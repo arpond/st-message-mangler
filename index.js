@@ -36,6 +36,7 @@ function defaultEffectShape(type = 'regex') {
         label: '',
         enabled: true,
         type,
+        target: 'user', // 'user' | 'character' | 'both' — which speaker's message the transform is applied to
         trigger: defaultTrigger(),
         regex: { pattern: '', flags: 'gi', replacement: '' },
         drunk: { intensity: 0.3 },
@@ -287,11 +288,17 @@ async function runBatchedLlmDetectors(effects) {
             return;
         }
         for (const effect of effects) {
-            const match = cleaned.match(new RegExp(`^\\s*${escapeRegExp(effect.id)}\\s*:\\s*(\\d+(?:\\.\\d+)?)`, 'im'));
+            // Permissive on purpose: finds the id anywhere (not just line-start) and takes the
+            // nearest number after it, skipping up to 20 non-digit chars — covers "**id**: 7",
+            // `"id": 7`, "id: 7/10", "id is rated 7 out of 10", etc. without needing to enumerate
+            // every format a model might use. Safe to be permissive since each id is a long,
+            // distinctive random string that won't collide with another effect's answer.
+            const match = cleaned.match(new RegExp(`${escapeRegExp(effect.id)}[^\\d]{0,20}(\\d+(?:\\.\\d+)?)`, 'i'));
             if (match) {
-                applyLlmRating(effect, Number(match[1]));
+                const rating = Math.min(10, Math.max(0, Number(match[1])));
+                applyLlmRating(effect, rating);
             } else {
-                debugLog(`runBatchedLlmDetectors: no rating line found for "${effect.label}" (key "${effect.id}") — level left untouched.`);
+                debugLog(`runBatchedLlmDetectors: no rating found for "${effect.label}" (key "${effect.id}") — level left untouched.`);
             }
         }
         log(`Batched LLM detector updated ${effects.length} effect(s) in one call.`);
@@ -374,16 +381,24 @@ function looksDegenerate(text) {
 // connection, a bad prompt, or a degenerate/runaway generation all leave the text unchanged
 // rather than injecting garbage into the chat.
 async function runLlmRewrite(text, effect, level) {
+    // Some models respond to the literal maximum value (1.00 / 100%) with a noticeably weaker
+    // result than a near-maximum one (observed repeatedly: 0.91 reliably strong, 1.00
+    // consistently weak, across multiple prompt rewordings that ruled out phrasing as the
+    // cause). Capping what's substituted into the prompt just short of the true ceiling routes
+    // around that without guessing at wording again — doesn't affect the real `level` used for
+    // trigger/threshold logic elsewhere, only what this specific model call sees.
+    const promptLevel = Math.min(level, 0.99);
     const prompt = effect.llmRewrite.promptTemplate
         .replaceAll('{{original}}', wrapUntrusted(text))
-        .replaceAll('{{level}}', level.toFixed(2))
+        .replaceAll('{{level}}', promptLevel.toFixed(2))
+        .replaceAll('{{level_pct}}', String(Math.round(promptLevel * 100)))
         + INJECTION_GUARD
         + '\n\nRespond with ONLY the rewritten message — no reasoning, no explanation, no preamble.';
     // Cap output length relative to the input as a cheap backstop against runaway/looping
     // generations — generous enough for a real rewrite (up to 6x the original, floor 80,
     // ceiling 600 tokens) without letting a stuck decode loop run unbounded.
     const responseLength = Math.min(600, Math.max(80, Math.ceil(text.length / 3) * 6));
-    debugLog(`runLlmRewrite "${effect.label}": level=${level.toFixed(2)}, promptLength=${prompt.length} chars, responseLength cap=${responseLength} tokens`);
+    debugLog(`runLlmRewrite "${effect.label}": level=${level.toFixed(2)} (sent to model as ${promptLevel.toFixed(2)}), promptLength=${prompt.length} chars, responseLength cap=${responseLength} tokens`);
     try {
         const result = await context.generateRaw({ prompt, responseLength });
         debugLog(`runLlmRewrite "${effect.label}": raw result (${result.length} chars): ${JSON.stringify(result.slice(0, 300))}`);
@@ -418,12 +433,19 @@ async function applySingleEffect(text, effect, level) {
     }
 }
 
-async function applyEffects(originalText, message, settings) {
+// target gates the *transform*: whether an effect touches this speaker's message at all.
+// Independent of trigger.detectSource, which gates whether this speaker's message can update
+// the effect's *level* — an effect can detect from one speaker and transform the other's text.
+function effectAppliesToTarget(effect, source) {
+    return effect.target === 'both' || effect.target === source;
+}
+
+async function applyEffects(originalText, message, settings, source) {
     const budget = { remaining: settings.maxLlmCallsPerMessage };
-    debugLog(`applyEffects: starting, ${settings.effects.length} effect(s) configured, LLM call budget=${budget.remaining}`);
+    debugLog(`applyEffects: starting for source=${source}, ${settings.effects.length} effect(s) configured, LLM call budget=${budget.remaining}`);
 
     const dueLlmDetectors = settings.effects.filter(e => e.enabled && e.trigger.mode === 'progressive'
-        && e.trigger.detector === 'llm' && shouldDetectFromSource(e, 'user'));
+        && e.trigger.detector === 'llm' && shouldDetectFromSource(e, source));
     if (dueLlmDetectors.length > 0) {
         if (budget.remaining > 0) {
             budget.remaining--;
@@ -434,7 +456,7 @@ async function applyEffects(originalText, message, settings) {
             // get confused by overlapping quiet-generation requests. Serializing costs the
             // detector's own latency on this message instead of running for free in the
             // background, but only in this specific combination.
-            const hasRewriteEffect = settings.effects.some(e => e.enabled && e.type === 'llm-rewrite');
+            const hasRewriteEffect = settings.effects.some(e => e.enabled && e.type === 'llm-rewrite' && effectAppliesToTarget(e, source));
             if (hasRewriteEffect) {
                 debugLog(`applyEffects: awaiting LLM detector batch for ${dueLlmDetectors.length} effect(s) (serialized — an llm-rewrite effect is active this message), budget remaining after=${budget.remaining}`);
                 await runBatchedLlmDetectors(dueLlmDetectors);
@@ -454,14 +476,23 @@ async function applyEffects(originalText, message, settings) {
             continue;
         }
 
-        // A 'character'-only effect can still fire its transform on the user's message using
-        // whatever level the AI's dialogue put it at — it just never lets the user's own
-        // message move that level (updateAndGetEffectLevel is skipped, not just its result ignored).
+        // Detection runs regardless of target — an effect can detect from a speaker it doesn't
+        // transform (e.g. target: 'user' but detectSource: 'both', so the character's dialogue
+        // still builds the level even though only the user's own messages get rewritten).
+        // An effect whose detectSource doesn't include this speaker can still fire its transform
+        // here using whatever level the OTHER speaker's messages put it at — it just never lets
+        // this speaker's own message move that level (updateAndGetEffectLevel is skipped, not
+        // just its result ignored).
         const level = effect.trigger.mode === 'always'
             ? 1
-            : shouldDetectFromSource(effect, 'user')
+            : shouldDetectFromSource(effect, source)
                 ? updateAndGetEffectLevel(effect, message)
                 : getEffectLevel(effect);
+
+        if (!effectAppliesToTarget(effect, source)) {
+            debugLog(`applyEffects: "${effect.label}" — detection updated, but target=${effect.target} excludes ${source}; no transform.`);
+            continue;
+        }
         if (level < effect.trigger.minLevelToApply) {
             debugLog(`applyEffects: "${effect.label}" skipped — threshold not reached: level=${level.toFixed(2)} < minLevelToApply=${effect.trigger.minLevelToApply}`);
             continue;
@@ -503,7 +534,7 @@ async function onMessageSent(chatId) {
     }
 
     const original = message.mes;
-    const mangled = await applyEffects(original, message, settings);
+    const mangled = await applyEffects(original, message, settings, 'user');
     if (mangled === original) {
         debugLog(`onMessageSent: chatId=${chatId} — message unchanged, not rewritten.`);
         return;
@@ -523,10 +554,13 @@ async function onMessageSent(chatId) {
     log(`Mangled message ${chatId}: "${original}" -> "${mangled}"`);
 }
 
-// Only updates progressive-trigger levels from the AI's dialogue — never rewrites the
-// character's message. Lets a character's own words (e.g. drinking talk, casting a spell)
-// escalate a shared effect without the user having to say it themselves.
-function onCharacterMessageRendered(chatId) {
+// Runs the same pipeline as onMessageSent, but for the AI's message: detection always runs
+// (gated by trigger.detectSource, same as onMessageSent), and the transform only runs for
+// effects whose target includes 'character' (see effectAppliesToTarget). Unlike onMessageSent,
+// this message is already rendered to the DOM by the time this hook fires (CHARACTER_MESSAGE_RENDERED
+// fires after render, whereas MESSAGE_SENT fires before) — so a text change here needs an
+// explicit context.updateMessageBlock() to actually show up, plus a saveChat() to persist it.
+async function onCharacterMessageRendered(chatId) {
     const settings = getSettings();
     debugLog(`onCharacterMessageRendered: chatId=${chatId}, extension enabled=${settings.enabled}`);
     if (!settings.enabled) return;
@@ -537,15 +571,27 @@ function onCharacterMessageRendered(chatId) {
         return;
     }
 
-    const progressiveEffects = settings.effects.filter(e => e.enabled && e.trigger.mode === 'progressive'
-        && shouldDetectFromSource(e, 'character'));
-    debugLog(`onCharacterMessageRendered: chatId=${chatId}, ${progressiveEffects.length} progressive effect(s) eligible from 'character' source: ${progressiveEffects.map(e => e.label).join(', ')}`);
-    const dueLlmDetectors = progressiveEffects.filter(e => e.trigger.detector === 'llm');
-    runBatchedLlmDetectors(dueLlmDetectors); // fire-and-forget, once — see item 5 in the plan
-
-    for (const effect of progressiveEffects) {
-        updateAndGetEffectLevel(effect, message);
+    const original = message.mes;
+    const mangled = await applyEffects(original, message, settings, 'character');
+    if (mangled === original) {
+        debugLog(`onCharacterMessageRendered: chatId=${chatId} — message unchanged, not rewritten.`);
+        return;
     }
+
+    message.mes = mangled;
+    message.extra = message.extra || {};
+
+    if (settings.showOriginal) {
+        message.extra.mangler_original = original;
+        message.extra.display_text = `${mangled}\n\n<div class="st_mangler_original">✎ original: ${escapeHtmlForDisplay(original)}</div>`;
+    } else {
+        delete message.extra.display_text;
+        delete message.extra.mangler_original;
+    }
+
+    context.updateMessageBlock(chatId, message);
+    context.saveChat();
+    log(`Mangled character message ${chatId}: "${original}" -> "${mangled}"`);
 }
 
 // Shared <input>/<textarea> template for anything bound to a `settings.effects[i].<dataField>`
@@ -638,6 +684,10 @@ function renderTriggerPanel(effect) {
                 Turns active: <span class="st_mangler_effect_turns_val" data-effect-id="${effect.id}">${getEffectTurnsActive(effect)}</span>
                 &nbsp;|&nbsp;
                 Locked: <span class="st_mangler_effect_locked_val" data-effect-id="${effect.id}">${getEffectLocked(effect) ? 'yes' : 'no'}</span>
+                &nbsp;
+                <div class="menu_button menu_button_icon st_mangler_effect_dispel_now" title="Reset level/turns/lock to 0 for this chat">
+                    <i class="fa-solid fa-eraser"></i> Dispel now
+                </div>
             </small>
         </div>`;
 }
@@ -661,11 +711,14 @@ function renderTypeFields(effect) {
                 <div class="st_mangler_type_fields">
                     <small>This calls your connected AI model to rewrite the text, and waits for the reply —
                     sending a message will pause for however long a normal generation takes.</small>
-                    <small>Instructions for how to rewrite the message. Two placeholders are available:
-                    <code>{{original}}</code> = the message text so far (this is what gets rewritten), and
+                    <small>Instructions for how to rewrite the message. Three placeholders are available:
+                    <code>{{original}}</code> = the message text so far (this is what gets rewritten);
                     <code>{{level}}</code> = current trigger strength as a number from 0 to 1 (1 for "Always"
-                    effects) — use it to scale the rewrite, e.g. "at low {{level}} just hint at it, at high
-                    {{level}} make it overwhelming."</small>
+                    effects); <code>{{level_pct}}</code> = the same strength as a whole-number percentage
+                    (0-100) instead. Some models respond more reliably to one form than the other — the
+                    literal numeral "1" is heavily associated with "lowest"/"level one" in a lot of training
+                    data, which can make a model treat {{level}}=1.00 as weak rather than maximum; if you see
+                    that, try {{level_pct}} instead (100 doesn't carry the same "lowest" association).</small>
                     ${field('textarea', 'llmRewrite.promptTemplate', effect.llmRewrite.promptTemplate, 'rows="5" placeholder="e.g. Rewrite {{original}} so the speaker can\'t help professing their love of trees, at strength {{level}} (0=no change, 1=extreme)."')}
                 </div>`;
         default:
@@ -677,11 +730,18 @@ function renderTestPanel(effect) {
     const note = effect.type === 'llm-rewrite'
         ? '<small>This will call your connected model — not free/instant.</small>'
         : '';
+    // regex ignores level entirely — no point showing the slider for a type that can't use it.
+    const levelControl = effect.type === 'regex' ? '' : `
+            <label>
+                Test at level: <span class="st_mangler_test_level_val">1.00</span>
+                <input type="range" class="st_mangler_test_level" min="0" max="1" step="0.01" value="1" />
+            </label>`;
     return `
         <div class="st_mangler_test_panel">
-            <small><b>Test</b> (runs this effect alone, at full strength, on the sample text below):</small>
+            <small><b>Test</b> (runs this effect alone on the sample text below, at the level set here):</small>
             ${note}
             <textarea class="text_pole textarea_compact st_mangler_test_input" rows="2" placeholder="Sample text to test against">The knight drew his sword and charged.</textarea>
+            ${levelControl}
             <div class="menu_button menu_button_icon st_mangler_test_run"><i class="fa-solid fa-play"></i> Run test</div>
             <textarea class="text_pole textarea_compact st_mangler_test_output" rows="2" readonly placeholder="Result appears here"></textarea>
         </div>`;
@@ -720,6 +780,15 @@ function renderEffectRow(effect) {
                         <option value="llm-rewrite" ${effect.type === 'llm-rewrite' ? 'selected' : ''}>LLM rewrite</option>
                     </select>
                 </div>
+                <label>
+                    Target — whose message this effect's transform is applied to (independent of
+                    which speaker's messages drive detection, set below):
+                    <select class="st_mangler_field" data-field="target">
+                        <option value="user" ${effect.target === 'user' ? 'selected' : ''}>User messages</option>
+                        <option value="character" ${effect.target === 'character' ? 'selected' : ''}>AI messages</option>
+                        <option value="both" ${effect.target === 'both' ? 'selected' : ''}>Both</option>
+                    </select>
+                </label>
                 <label>
                     Trigger:
                     <select class="st_mangler_field" data-field="trigger.mode">
@@ -870,6 +939,15 @@ function addSettingsUI() {
         refreshEffectList(settings);
     });
 
+    $('#st_mangler_effects').on('click', '.st_mangler_effect_dispel_now', function () {
+        const effect = settings.effects.find(e => e.id === $(this).closest('.st_mangler_effect').data('effect-id'));
+        if (!effect) return;
+        setEffectLevel(effect, 0);
+        setEffectTurnsActive(effect, 0);
+        setEffectLocked(effect, false);
+        log(`Manually dispelled "${effect.label}".`);
+    });
+
     $('#st_mangler_effects').on('click', '.st_mangler_effect_delete', function () {
         const id = $(this).closest('.st_mangler_effect').data('effect-id');
         settings.effects = settings.effects.filter(e => e.id !== id);
@@ -888,6 +966,10 @@ function addSettingsUI() {
         context.saveSettingsDebounced();
     });
 
+    $('#st_mangler_effects').on('input', '.st_mangler_test_level', function () {
+        $(this).closest('.st_mangler_test_panel').find('.st_mangler_test_level_val').text(Number($(this).val()).toFixed(2));
+    });
+
     $('#st_mangler_effects').on('click', '.st_mangler_test_run', async function () {
         const row = $(this).closest('.st_mangler_effect');
         const effect = settings.effects.find(e => e.id === row.data('effect-id'));
@@ -895,9 +977,11 @@ function addSettingsUI() {
 
         const input = row.find('.st_mangler_test_input');
         const output = row.find('.st_mangler_test_output');
+        const levelInput = row.find('.st_mangler_test_level');
+        const level = levelInput.length ? Number(levelInput.val()) : 1;
         output.val('Running...');
         try {
-            output.val(await applySingleEffect(input.val(), effect, 1));
+            output.val(await applySingleEffect(input.val(), effect, level));
         } catch (err) {
             output.val(`Error: ${err.message}`);
         }

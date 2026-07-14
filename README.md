@@ -1,7 +1,9 @@
 # Message Mangler
 
-SillyTavern extension that rewrites your chat input — through a configurable pipeline of
-**effects** — before it's shown in the chat log and before it's sent to the LLM. Both the
+SillyTavern extension that rewrites chat messages — through a configurable pipeline of
+**effects** — before they're shown in the chat log and before they're sent to the LLM. Each
+effect has a **Target** (user messages, AI messages, or both) — by default effects only touch
+your own messages, but can be set to also or instead rewrite the character's replies. Both the
 displayed bubble and the model's actual context reflect the final mangled text; optionally you
 can also show the original alongside it (display-only — the model never sees the original).
 
@@ -37,14 +39,18 @@ Open the **Message Mangler** drawer in the Extensions settings panel.
 - **Effects** — an ordered list, each independently configurable. Each effect collapses to one
   line (label, type, reorder/delete) — click the chevron to expand it. New effects open expanded
   by default. Click **Add effect** to add
-  one, pick a **type**, and configure its **trigger**. Use the ▲/▼ buttons to reorder — order
+  one, pick a **type**, set its **Target** (User messages / AI messages / Both — which speaker's
+  message the transform actually rewrites; independent of the trigger's detection source below),
+  and configure its **trigger**. Use the ▲/▼ buttons to reorder — order
   matters, since each effect runs on the previous one's output. **Export effects** downloads the
   current list as JSON; **Import effects** reads a JSON file back in, appending its effects as
   new entries (each gets a fresh id, so importing never overwrites or collides with what you
   already have — reorder/delete afterward as needed). Every effect also has a **Test** panel:
-  type sample text, click **Run test**, and see that one effect's output in isolation (at full
-  strength) without sending a real chat message — useful for tuning a regex pattern or an
-  LLM-rewrite prompt before wiring it to a live trigger.
+  type sample text, adjust the **Test at level** slider (drunk/llm-rewrite only — regex ignores
+  level entirely), click **Run test**, and see that one effect's output in isolation without
+  sending a real chat message — useful for tuning a regex pattern, checking a drunk effect's
+  intensity curve at different levels, or an LLM-rewrite prompt before wiring it to a live
+  trigger.
 
 ### Debug logging
 
@@ -70,8 +76,21 @@ you're done — it persists across reloads like any other setting.
 | **Drunk mangle** | Algorithmic character-level mangling (random letter doubling + trailing elongation), scaled by intensity. |
 | **LLM rewrite** | Sends the message to your currently-connected model with a custom prompt template and replaces it with the response. Needed for transforms regex can't express — e.g. "make the speaker compulsively profess love of trees" — since that's a rewrite of meaning, not a substitution. |
 
-**LLM rewrite** prompt templates support two placeholders: `{{original}}` (the text so far in
-the pipeline) and `{{level}}` (0–1 trigger strength, `1` for `always`-mode effects). Example:
+**LLM rewrite** prompt templates support three placeholders: `{{original}}` (the text so far in
+the pipeline), `{{level}}` (0–1 trigger strength, `1` for `always`-mode effects), and
+`{{level_pct}}` (the same strength as a whole-number 0–100 percentage instead) — pick whichever
+form reads more naturally in your template.
+
+**Known model quirk:** on one local model, the literal maximum value (`{{level}}=1.00` /
+`{{level_pct}}=100`) reliably produced a *weaker* result than a near-maximum one (`0.91`
+consistently strong, `1.00` consistently weak) — reproduced across repeated identical runs, and
+unaffected by rewording the prompt (spelling out "1.0 = maximum" explicitly, removing "(max of
+N)" framing, switching numeral systems) or by which placeholder was used. Since neither
+wording change nor the choice of placeholder fixed it, the extension now caps what's actually
+substituted into `{{level}}`/`{{level_pct}}` at `0.99`/`99` — the real level used for
+trigger/threshold logic is untouched, only what this one prompt sees is nudged just short of the
+literal ceiling. If your model doesn't have this quirk, this cap is invisible (0.99 vs 1.00
+reads identically in practice). Example:
 
 ```
 Rewrite the message below so the speaker can't help professing their love of trees, however
@@ -173,7 +192,9 @@ security boundary.
     level for this many consecutive turns, so an escalating effect doesn't just plateau forever
     once maxed out.
   - The current level, turns-active count, and locked state for the active chat are shown live
-    next to each progressive effect.
+    next to each progressive effect, alongside a **Dispel now** button that immediately resets
+    level, turns-active, and locked state to their defaults for the active chat — the manual
+    equivalent of a dispel-keyword match, useful for testing without crafting a matching message.
 
 Multiple progressive effects using `llm` detection are batched into a **single** classification
 call per message (one prompt rating every due effect at once) rather than one call each — see
@@ -198,9 +219,19 @@ and rewrites `message.mes` in place (what's stored and sent to the model), and �
 original" is enabled — sets `message.extra.display_text` (a render-only override SillyTavern
 already supports) so the chat bubble can show extra context without it ever reaching the prompt.
 
-Progressive triggers also hook `CHARACTER_MESSAGE_RENDERED` (read-only — it updates trigger
-levels but never rewrites the AI's message) and store each effect's per-chat level in
-`chatMetadata`, so it persists with the chat file and resets naturally when you switch chats.
+Also hooks `CHARACTER_MESSAGE_RENDERED` — this always updates progressive trigger levels from
+the AI's dialogue (same as before), and additionally now runs the transform pipeline for any
+effect whose **Target** includes AI messages. Since that event fires *after* the message is
+already rendered to the DOM (unlike `MESSAGE_SENT`, which fires before render), a text change
+here explicitly re-renders that message block and saves the chat, rather than relying on the
+normal render path. Each effect's per-chat level lives in `chatMetadata`, so it persists with the
+chat file and resets naturally when you switch chats.
+
+The LLM detector's classification prompt is deliberately free-form rather than JSON-schema-
+constrained (see the Triggers section above), and its rating-line parser is permissive on
+purpose — it finds an effect's id anywhere in the model's response and takes the nearest number
+after it, so formats like `**id**: 7`, `id: 7/10`, or `id rated 8 out of 10` all parse correctly,
+not just an exact `id: 7` at the start of a line.
 
 Settings from earlier versions (a flat regex rule list + a single hardcoded drunk mode) are
 migrated automatically into equivalent `effects[]` entries the first time this version loads.
