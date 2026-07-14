@@ -9,6 +9,29 @@
     flex: 1;
 }
 
+.st-message-mangler-settings .st_mangler_effect_toggle {
+    flex: 0 0 auto;
+    cursor: pointer;
+}
+
+.st-message-mangler-settings .st_mangler_effect_summary_label {
+    flex: 1;
+    font-weight: bold;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.st-message-mangler-settings .st_mangler_effect_summary_type {
+    opacity: 0.7;
+    font-size: 0.9em;
+    white-space: nowrap;
+}
+
+.st-message-mangler-settings .st_mangler_effect_body {
+    margin-top: 0.4em;
+}
+
 .st-message-mangler-settings .st_mangler_trigger,
 .st-message-mangler-settings .st_mangler_type_fields,
 .st-message-mangler-settings .st_mangler_test_panel {
@@ -19,6 +42,17 @@
 
 .st-message-mangler-settings .st_mangler_test_panel textarea {
     margin: 0.2em 0;
+}
+
+.st-message-mangler-settings .st_mangler_trigger_row {
+    display: block;
+    margin: 0.35em 0;
+}
+
+.st-message-mangler-settings .st_mangler_trigger_row input,
+.st-message-mangler-settings .st_mangler_trigger_row select {
+    display: block;
+    margin-top: 0.15em;
 }
 
 .st-message-mangler-settings #st_mangler_effects {

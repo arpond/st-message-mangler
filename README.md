@@ -34,7 +34,9 @@ Open the **Message Mangler** drawer in the Extensions settings panel.
 - **Max LLM calls per message** — a hard cap on real generation round-trips a single message can
   trigger, counting both the (batched — see below) LLM detector call and every `llm-rewrite`
   effect. Anything beyond the cap is skipped and logged to the console rather than fired anyway.
-- **Effects** — an ordered list, each independently configurable. Click **Add effect** to add
+- **Effects** — an ordered list, each independently configurable. Each effect collapses to one
+  line (label, type, reorder/delete) — click the chevron to expand it. New effects open expanded
+  by default. Click **Add effect** to add
   one, pick a **type**, and configure its **trigger**. Use the ▲/▼ buttons to reorder — order
   matters, since each effect runs on the previous one's output. **Export effects** downloads the
   current list as JSON; **Import effects** reads a JSON file back in, appending its effects as
@@ -43,6 +45,22 @@ Open the **Message Mangler** drawer in the Extensions settings panel.
   type sample text, click **Run test**, and see that one effect's output in isolation (at full
   strength) without sending a real chat message — useful for tuning a regex pattern or an
   LLM-rewrite prompt before wiring it to a live trigger.
+
+### Debug logging
+
+There's a `debug` setting with no UI control — enable it from the browser console when you need
+to trace exactly what the pipeline is doing for a message (current level per effect, whether the
+trigger threshold was reached, whether a rewrite actually happened, detector batching, etc.):
+
+```js
+const ctx = SillyTavern.getContext();
+ctx.extensionSettings.st_message_mangler.debug = true;
+ctx.saveSettingsDebounced();
+```
+
+Once enabled, every relevant decision point logs to the console under
+`[message-mangler] [debug]`, filterable by that prefix. Set it back to `false` the same way when
+you're done — it persists across reloads like any other setting.
 
 ### Effect types
 
@@ -71,6 +89,19 @@ send where it's active — unlike LLM-based *triggers* (below), which run in the
 never block sending. Use `minLevelToApply` and a `keyword` trigger to keep it dormant (and free)
 until actually relevant.
 
+**Reasoning-model output:** the extension appends an instruction telling the model to reply with
+only the rewritten message (no chain-of-thought/preamble), and also strips it programmatically —
+but that strip only works if SillyTavern's **Reasoning → Auto-Parse** setting is enabled with a
+template matching your connected model's think-tag format (Advanced Formatting panel). If your
+model still leaks visible reasoning into the rewritten message, check that setting first.
+
+**Runaway-generation safety net:** the response length is capped relative to the input (generous,
+but bounded), and the output is checked for the classic degenerate-repetition failure mode (a
+short chunk looping thousands of times, e.g. `"...ceralceralceral..."`) before being accepted —
+if either trips, the message is left unchanged and a warning is logged rather than injecting
+garbage into the chat. This is usually a sign your connected backend needs a repetition penalty
+(or similar anti-looping sampler setting) tuned, not something this extension can fix upstream.
+
 **Prompt-injection mitigation:** the text substituted for `{{original}}` (and the scene
 transcript used by LLM detection) is wrapped in `<user_message>` tags with a fixed trailing
 instruction telling the model to treat that content as literal text, not as instructions —
@@ -83,14 +114,56 @@ security boundary.
 
 - **Always** — the effect runs on every message while enabled.
 - **Progressive** — the effect's strength is driven by a per-chat 0–1 "level" that escalates
-  based on detected activity in *either* the user's or the AI character's recent messages, and
-  decays back down on quiet turns. Two detectors:
-  - **Keyword match** (default, free, instant) — scans messages against a comma-separated word
-    list. A hit raises the level by "increment per hit"; no hit lowers it by "decay per turn".
-  - **LLM classification** — asks your connected model to rate (0–10) how strongly the effect's
-    condition currently applies, based on the last N messages ("LLM lookback"). Runs in the
+  based on detected activity in the user's and/or the AI character's recent messages (see
+  **Detect from** below), and decays back down on quiet turns. Two detectors:
+  - **Keyword match** (default, free, instant) — scans messages against a comma-separated
+    **Keywords** list. A hit raises the level by "increment per hit"; no hit lowers it by "decay
+    per turn".
+  - **LLM classification** — asks your connected model to rate (0–10) how strongly a condition
+    you describe in the **Condition to detect** field currently applies, based on the last N
+    messages ("LLM lookback"). Write this as a plain-language description of what the model
+    should judge, e.g. "the speaker is under a magical compulsion to talk about trees" — a vague
+    label like "Tree Spell" alone gives the classifier little to work with. Runs in the
     background (fire-and-forget), so it never blocks sending — the level updates a moment after
-    classification returns, lagging by roughly one turn.
+    classification returns, lagging by roughly one turn. (The **Keywords** field only applies to
+    keyword-match detection and is hidden while LLM classification is selected.)
+
+    The classifier prompt is deliberately free-form, not JSON-schema-constrained: the model is
+    told it may reason first, then must end its response with one `<effect-id>: <rating>` line
+    per condition, which is extracted by regex afterward. Forcing structured JSON output from
+    the first token gives a reasoning-dependent model no room to think — this was observed to
+    reliably return an empty response on a local reasoning model even for an obvious match, so
+    free-form + line extraction is the default rather than a schema.
+
+    **Exception:** if any enabled `llm-rewrite` effect is also active on the same message, the
+    detector call is awaited instead of run in the background. Two concurrent `generateRaw`
+    calls to the same backend has been observed to break SillyTavern's send flow entirely (the
+    user's message never renders, even though both calls complete without error) — this is
+    especially likely with local single-worker backends that can only process one generation at
+    a time. Serializing costs the detector's own latency on that message (rather than running
+    free in the background) only in this specific combination.
+
+    LLM classification has three **integration modes**, controlling how each rating affects the
+    level:
+    - **Swings freely (absolute, default)** — the level is set directly to the latest rating
+      each time (e.g. a 7/10 rating sets level to 0.7), with no memory of the previous level. Best
+      when you want the effect strength to track "how true does this look right now."
+    - **Cumulative** — the rating is reduced to a hit/no-hit test against **Hit threshold**
+      (rating ≥ threshold = hit), then the level increments/decays exactly like keyword mode
+      (**Increment per hit** / **Decay per turn**). Gives the level momentum — it builds up over
+      several consecutive hits and eases off on quiet turns, rather than jumping around with
+      each individual rating.
+    - **Cumulative, locks once triggered** — same as cumulative, but once the level reaches
+      **Lock threshold** it locks: further ratings are ignored entirely (no increment, no decay)
+      until a **Dispel keyword** clears it. Use this for a condition that, once clearly true,
+      should stay true rather than fade if the model's later ratings dip. The live "Locked"
+      readout shows whether an effect is currently locked for the active chat.
+  - **Detect from** — restricts which speaker's messages are allowed to update the level:
+    **Both** (default, matches earlier versions), **User messages only**, or **AI/character
+    messages only**. Applies identically to either detector. Note this only gates *detection* —
+    a `character`-only effect can still apply its transform to your messages once the AI's
+    dialogue has raised its level; it just never lets your own messages move that level (and
+    vice versa for `user`-only).
   - **Min level to apply** — below this, the effect is skipped entirely (dormant), avoiding
     wasted regex/drunk/LLM work when nothing's triggered it yet.
   - **Dispel keywords** — a separate comma-separated word list, checked every turn regardless of
@@ -99,8 +172,8 @@ security boundary.
   - **Max turns active** (0 = disabled) — auto-dispels an effect that's stayed at/above its min
     level for this many consecutive turns, so an escalating effect doesn't just plateau forever
     once maxed out.
-  - The current level and turns-active count for the active chat are shown live next to each
-    progressive effect.
+  - The current level, turns-active count, and locked state for the active chat are shown live
+    next to each progressive effect.
 
 Multiple progressive effects using `llm` detection are batched into a **single** classification
 call per message (one prompt rating every due effect at once) rather than one call each — see
