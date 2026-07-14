@@ -1,0 +1,36 @@
+.st-message-mangler-settings .st_mangler_effect {
+    border: 1px solid var(--SmartThemeBorderColor, #444);
+    border-radius: 6px;
+    padding: 0.4em;
+    margin: 0.4em 0;
+}
+
+.st-message-mangler-settings .st_mangler_effect input.text_pole {
+    flex: 1;
+}
+
+.st-message-mangler-settings .st_mangler_trigger,
+.st-message-mangler-settings .st_mangler_type_fields,
+.st-message-mangler-settings .st_mangler_test_panel {
+    margin-top: 0.3em;
+    padding-top: 0.3em;
+    border-top: 1px dashed var(--SmartThemeBorderColor, #666);
+}
+
+.st-message-mangler-settings .st_mangler_test_panel textarea {
+    margin: 0.2em 0;
+}
+
+.st-message-mangler-settings #st_mangler_effects {
+    max-height: 50vh;
+    overflow-y: auto;
+}
+
+.st_mangler_original {
+    margin-top: 0.5em;
+    padding-top: 0.3em;
+    border-top: 1px dashed var(--SmartThemeBorderColor, #666);
+    font-size: 0.85em;
+    font-style: italic;
+    opacity: 0.7;
+}

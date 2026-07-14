@@ -1,0 +1,12 @@
+{
+  "display_name": "Message Mangler",
+  "loading_order": 1,
+  "requires": [],
+  "optional": [],
+  "dependencies": [],
+  "js": "index.js",
+  "css": "style.css",
+  "author": "",
+  "version": "1.0.0",
+  "homePage": "https://github.com/<user>/st-message-mangler"
+}
