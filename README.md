@@ -36,12 +36,22 @@ Open the **Message Mangler** drawer in the Extensions settings panel.
 - **Max LLM calls per message** — a hard cap on real generation round-trips a single message can
   trigger, counting both the (batched — see below) LLM detector call and every `llm-rewrite`
   effect. Anything beyond the cap is skipped and logged to the console rather than fired anyway.
+- **Generation timeout (ms)** — how long to wait on a single LLM call (default 60000 = 60s)
+  before treating it as failed. This does **not** cancel the underlying request to your backend —
+  SillyTavern doesn't expose a way for extensions to abort an in-flight generation — a hung
+  backend may keep working in the background after this fires. What it fixes is this extension's
+  own pipeline: without it, a backend that never resolves (as opposed to erroring, which the
+  retry below already handles) would block message send or character rendering forever with no
+  recovery. After timing out, the same retry-once-then-fail-open behavior applies as any other
+  failure.
 - **Effects** — an ordered list, each independently configurable. Each effect collapses to one
-  line (label, type, reorder/delete) — click the chevron to expand it. New effects open expanded
-  by default. Click **Add effect** to add
+  line (label, type, reorder/duplicate/delete) — click the chevron to expand it. New effects open
+  expanded by default. Click **Add effect** to add
   one, pick a **type**, set its **Target** (User messages / AI messages / Both — which speaker's
   message the transform actually rewrites; independent of the trigger's detection source below),
-  and configure its **trigger**. Use the ▲/▼ buttons to reorder — order
+  and configure its **trigger**. Use the ▲/▼ buttons to reorder, or the copy icon to **duplicate**
+  an effect (inserted right after the original, with a fresh id — a quick way to start a similar
+  effect from an existing one instead of reconfiguring from scratch) — order
   matters, since each effect runs on the previous one's output. **Export effects** downloads the
   current list as JSON; **Import effects** reads a JSON file back in, appending its effects as
   new entries (each gets a fresh id, so importing never overwrites or collides with what you
@@ -201,7 +211,10 @@ call per message (one prompt rating every due effect at once) rather than one ca
 "Max LLM calls per message" above for the overall cap.
 
 Effects run in list order. An invalid regex pattern, or a failed/unreachable LLM call, is
-skipped/logged rather than blocking your message — the pipeline fails open.
+skipped/logged rather than blocking your message — the pipeline fails open. Every LLM call
+(detector and rewrite alike) retries once automatically before falling back to this fail-open
+behavior, absorbing occasional transient connection hiccups without any visible effect on
+success — only a genuinely persistent failure reaches the fail-open path.
 
 ### Example effects
 

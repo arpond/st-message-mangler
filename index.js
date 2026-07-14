@@ -55,6 +55,7 @@ const DEFAULT_SETTINGS = {
     enabled: true,
     showOriginal: false,
     maxLlmCallsPerMessage: 3,
+    generateTimeoutMs: 60000, // per-attempt timeout for any LLM call (detector or rewrite); see generateRawWithRetry
     debug: false, // no UI control on purpose — toggle from the browser console:
     // const ctx = SillyTavern.getContext(); ctx.extensionSettings.st_message_mangler.debug = true; ctx.saveSettingsDebounced();
     effects: [],
@@ -211,6 +212,34 @@ function matchesKeywordList(text, keywordList) {
 // we build, plus a fixed trailing instruction the user-editable template can't override —
 // mitigates (does not guarantee against) the text itself trying to hijack the classification/
 // rewrite prompt via injected instructions.
+// Races a promise against a timeout. Note this can't actually cancel the underlying HTTP
+// request — context.generateRaw doesn't expose an AbortController to callers, so a hung backend
+// may keep running after we give up waiting. What this fixes is OUR pipeline: without it, a
+// truly hung (never resolves, never rejects) call blocks message send/character rendering
+// forever, with no recovery — after the timeout we proceed exactly as if it had rejected.
+function withTimeout(promise, ms, label) {
+    let timeoutId;
+    const timeout = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+    });
+    return Promise.race([promise, timeout]).finally(() => clearTimeout(timeoutId));
+}
+
+// Retries exactly once before letting the caller's own fail-open catch handle a second failure.
+// Unconditional (no error-type check) — generateRaw's errors aren't classified reliably enough
+// to distinguish transient (connection hiccup, timeout) from deterministic here, and one wasted
+// extra call on a genuine deterministic failure is cheap next to the resilience gained against
+// the local-backend flakiness this session's debugging kept running into.
+async function generateRawWithRetry(params, label) {
+    const timeoutMs = getSettings().generateTimeoutMs;
+    try {
+        return await withTimeout(context.generateRaw(params), timeoutMs, label);
+    } catch (err) {
+        warn(`${label} failed once (${err.message}) — retrying...`);
+        return await withTimeout(context.generateRaw(params), timeoutMs, label);
+    }
+}
+
 function wrapUntrusted(text) {
     return `<user_message>\n${text}\n</user_message>`;
 }
@@ -280,7 +309,7 @@ async function runBatchedLlmDetectors(effects) {
     const responseLength = Math.min(800, 200 + effects.length * 100);
     debugLog(`runBatchedLlmDetectors: promptLength=${prompt.length} chars, responseLength cap=${responseLength} tokens, effect ids=[${effects.map(e => e.id).join(', ')}]`);
     try {
-        const result = await context.generateRaw({ prompt, responseLength });
+        const result = await generateRawWithRetry({ prompt, responseLength }, 'Batched LLM detector');
         debugLog(`runBatchedLlmDetectors: raw result (${result.length} chars): ${JSON.stringify(result.slice(0, 500))}`);
         const cleaned = removeReasoningFromString(result);
         if (looksDegenerate(cleaned)) {
@@ -400,7 +429,7 @@ async function runLlmRewrite(text, effect, level) {
     const responseLength = Math.min(600, Math.max(80, Math.ceil(text.length / 3) * 6));
     debugLog(`runLlmRewrite "${effect.label}": level=${level.toFixed(2)} (sent to model as ${promptLevel.toFixed(2)}), promptLength=${prompt.length} chars, responseLength cap=${responseLength} tokens`);
     try {
-        const result = await context.generateRaw({ prompt, responseLength });
+        const result = await generateRawWithRetry({ prompt, responseLength }, `llm-rewrite effect "${effect.label}"`);
         debugLog(`runLlmRewrite "${effect.label}": raw result (${result.length} chars): ${JSON.stringify(result.slice(0, 300))}`);
         // generateRaw (unlike generateQuietPrompt) doesn't strip reasoning blocks itself —
         // do it here so a reasoning model's <think>...</think> doesn't leak into the chat
@@ -766,6 +795,9 @@ function renderEffectRow(effect) {
                 <span class="st_mangler_effect_summary_type">${EFFECT_TYPE_LABELS[effect.type] ?? effect.type}</span>
                 <div class="menu_button menu_button_icon st_mangler_effect_move_up" title="Move up"><i class="fa-solid fa-arrow-up"></i></div>
                 <div class="menu_button menu_button_icon st_mangler_effect_move_down" title="Move down"><i class="fa-solid fa-arrow-down"></i></div>
+                <div class="menu_button menu_button_icon st_mangler_effect_duplicate" title="Duplicate effect">
+                    <i class="fa-solid fa-copy"></i>
+                </div>
                 <div class="menu_button menu_button_icon st_mangler_effect_delete" title="Delete effect">
                     <i class="fa-solid fa-trash"></i>
                 </div>
@@ -883,6 +915,11 @@ function addSettingsUI() {
                         Max LLM calls per message (caps detector + rewrite round-trips combined):
                         <input id="st_mangler_max_llm_calls" type="number" min="0" max="20" class="text_pole" style="max-width: 5em;" value="${settings.maxLlmCallsPerMessage}" />
                     </label>
+                    <label>
+                        Generation timeout (ms) — how long to wait on a single LLM call before treating it as
+                        failed (doesn't cancel the underlying request, just stops blocking the pipeline on it):
+                        <input id="st_mangler_generate_timeout" type="number" min="1000" max="300000" step="1000" class="text_pole" style="max-width: 7em;" value="${settings.generateTimeoutMs}" />
+                    </label>
                     <hr>
                     <small><b>Effects</b> (applied in order). Each can run always or be triggered progressively by
                     detected keywords/LLM classification of the recent scene.</small>
@@ -916,6 +953,10 @@ function addSettingsUI() {
         settings.maxLlmCallsPerMessage = Number($(this).val());
         context.saveSettingsDebounced();
     });
+    $('#st_mangler_generate_timeout').on('input', function () {
+        settings.generateTimeoutMs = Number($(this).val());
+        context.saveSettingsDebounced();
+    });
 
     $('#st_mangler_add_effect').on('click', () => {
         const effect = defaultEffect('regex');
@@ -946,6 +987,17 @@ function addSettingsUI() {
         setEffectTurnsActive(effect, 0);
         setEffectLocked(effect, false);
         log(`Manually dispelled "${effect.label}".`);
+    });
+
+    $('#st_mangler_effects').on('click', '.st_mangler_effect_duplicate', function () {
+        const id = $(this).closest('.st_mangler_effect').data('effect-id');
+        const index = settings.effects.findIndex(e => e.id === id);
+        if (index === -1) return;
+        const copy = { ...structuredClone(settings.effects[index]), id: `effect_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` };
+        settings.effects.splice(index + 1, 0, copy); // inserted right after the original
+        expandedEffectIds.add(copy.id); // opens expanded, same convention as a newly-added effect
+        refreshEffectList(settings);
+        context.saveSettingsDebounced();
     });
 
     $('#st_mangler_effects').on('click', '.st_mangler_effect_delete', function () {
