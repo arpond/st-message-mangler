@@ -49,6 +49,13 @@ Open the **Message Mangler** drawer in the Extensions settings panel.
   retry below already handles) would block message send or character rendering forever with no
   recovery. After timing out, the same retry-once-then-fail-open behavior applies as any other
   failure.
+- **Detection connection** — send LLM classification (the batched detector call) through a
+  different [Connection Manager](https://docs.sillytavern.app/extensions/connection-manager/)
+  profile than the main chat connection, e.g. a cheaper/faster model for classification while
+  your main connection handles roleplay and rewrites. Leave on "Use main connection (default)"
+  for today's behavior (unchanged). `llm-rewrite` effects always use the main connection — this
+  only affects detection. Requires the Connection Manager extension to be enabled with at least
+  one profile configured; if none are available, this shows a note instead of a dropdown.
 - **Effects** — an ordered list, each independently configurable. Each effect collapses to one
   line (label, type, reorder/duplicate/delete) — click the chevron to expand it. New effects open
   expanded by default. Click **Add effect** to add

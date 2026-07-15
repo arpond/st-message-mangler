@@ -57,6 +57,7 @@ const DEFAULT_SETTINGS = {
     highlightChanges: false,
     maxLlmCallsPerMessage: 3,
     generateTimeoutMs: 60000, // per-attempt timeout for any LLM call (detector or rewrite); see generateRawWithRetry
+    detectionConnectionProfileId: '', // '' = use the main connection (default). See runDetectionGenerate.
     debug: false, // no UI control on purpose — toggle from the browser console:
     // const ctx = SillyTavern.getContext(); ctx.extensionSettings.st_message_mangler.debug = true; ctx.saveSettingsDebounced();
     effects: [],
@@ -237,15 +238,36 @@ function withTimeout(promise, ms, label) {
 // Unconditional (no error-type check) — generateRaw's errors aren't classified reliably enough
 // to distinguish transient (connection hiccup, timeout) from deterministic here, and one wasted
 // extra call on a genuine deterministic failure is cheap next to the resilience gained against
-// the local-backend flakiness this session's debugging kept running into.
-async function generateRawWithRetry(params, label) {
+// the local-backend flakiness this session's debugging kept running into. `callFn` is invoked
+// fresh on each attempt (not a pre-built promise) so retrying actually re-issues the request.
+async function callLlmWithRetry(callFn, label) {
     const timeoutMs = getSettings().generateTimeoutMs;
     try {
-        return await withTimeout(context.generateRaw(params), timeoutMs, label);
+        return await withTimeout(callFn(), timeoutMs, label);
     } catch (err) {
         warn(`${label} failed once (${err.message}) — retrying...`);
-        return await withTimeout(context.generateRaw(params), timeoutMs, label);
+        return await withTimeout(callFn(), timeoutMs, label);
     }
+}
+
+async function generateRawWithRetry(params, label) {
+    return callLlmWithRetry(() => context.generateRaw(params), label);
+}
+
+// Detection-only alternative to generateRawWithRetry: if the user has picked a specific
+// Connection Manager profile for detection (settings.detectionConnectionProfileId), route the
+// classification call through that profile instead of the main connection — lets detection use
+// a cheaper/faster/different model than whatever's driving the actual roleplay. Only used by
+// runBatchedLlmDetectors; runLlmRewrite always uses the main connection.
+async function runDetectionGenerate(prompt, responseLength, label) {
+    const profileId = getSettings().detectionConnectionProfileId;
+    if (!profileId) return generateRawWithRetry({ prompt, responseLength }, label);
+    return callLlmWithRetry(async () => {
+        // ConnectionManagerRequestService.sendRequest returns { content, reasoning, ... } with
+        // extractData:true (the default) — unlike generateRaw, which returns a plain string.
+        const result = await context.ConnectionManagerRequestService.sendRequest(profileId, prompt, responseLength);
+        return typeof result === 'string' ? result : (result?.content ?? '');
+    }, label);
 }
 
 function wrapUntrusted(text) {
@@ -317,7 +339,7 @@ async function runBatchedLlmDetectors(effects) {
     const responseLength = Math.min(800, 200 + effects.length * 100);
     debugLog(`runBatchedLlmDetectors: promptLength=${prompt.length} chars, responseLength cap=${responseLength} tokens, effect ids=[${effects.map(e => e.id).join(', ')}]`);
     try {
-        const result = await generateRawWithRetry({ prompt, responseLength }, 'Batched LLM detector');
+        const result = await runDetectionGenerate(prompt, responseLength, 'Batched LLM detector');
         debugLog(`runBatchedLlmDetectors: raw result (${result.length} chars): ${JSON.stringify(result.slice(0, 500))}`);
         const cleaned = removeReasoningFromString(result);
         if (looksDegenerate(cleaned)) {
@@ -946,6 +968,23 @@ async function importEffectsFromFile(file, settings) {
     }
 }
 
+// Connection Manager (a built-in ST extension) may not be installed/enabled, or may have no
+// profiles configured yet — degrade to an explanatory note rather than an unusable empty dropdown.
+function renderDetectionProfileOptions(settings) {
+    const profiles = context.extensionSettings.connectionManager?.profiles ?? [];
+    if (profiles.length === 0) {
+        return '<small>No Connection Manager profiles available — detection always uses the main connection.</small>';
+    }
+    const options = profiles.map(p =>
+        `<option value="${p.id}" ${settings.detectionConnectionProfileId === p.id ? 'selected' : ''}>${escapeHtmlForDisplay(p.name)} (${escapeHtmlForDisplay(p.api)})</option>`,
+    ).join('');
+    return `
+        <select id="st_mangler_detection_profile">
+            <option value="">Use main connection (default)</option>
+            ${options}
+        </select>`;
+}
+
 function addSettingsUI() {
     const settings = getSettings();
     const html = `
@@ -976,6 +1015,12 @@ function addSettingsUI() {
                         Generation timeout (ms) — how long to wait on a single LLM call before treating it as
                         failed (doesn't cancel the underlying request, just stops blocking the pipeline on it):
                         <input id="st_mangler_generate_timeout" type="number" min="1000" max="300000" step="1000" class="text_pole" style="max-width: 7em;" value="${settings.generateTimeoutMs}" />
+                    </label>
+                    <label>
+                        Detection connection — send LLM classification through a different connection
+                        profile than the main chat (e.g. a cheaper/faster model). Rewrites always use
+                        the main connection.
+                        ${renderDetectionProfileOptions(settings)}
                     </label>
                     <hr>
                     <small><b>Effects</b> (applied in order). Each can run always or be triggered progressively by
@@ -1016,6 +1061,10 @@ function addSettingsUI() {
     });
     $('#st_mangler_generate_timeout').on('input', function () {
         settings.generateTimeoutMs = Number($(this).val());
+        context.saveSettingsDebounced();
+    });
+    $('#st_mangler_detection_profile').on('input', function () {
+        settings.detectionConnectionProfileId = $(this).val();
         context.saveSettingsDebounced();
     });
 
