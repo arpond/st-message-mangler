@@ -72,7 +72,10 @@ Open the **Message Mangler** drawer in the Extensions settings panel.
   level entirely), click **Run test**, and see that one effect's output in isolation without
   sending a real chat message — useful for tuning a regex pattern, checking a drunk effect's
   intensity curve at different levels, or an LLM-rewrite prompt before wiring it to a live
-  trigger.
+  trigger. Progressive effects also get a **Test detection** button, checking `trigger.keywords`/
+  `trigger.llmCondition` against the same sample text — keyword mode reports the match instantly;
+  LLM mode fires a real classification call and shows the raw rating. Neither ever touches the
+  effect's actual level/turns/locked state for the current chat.
 
 ### Debug logging
 

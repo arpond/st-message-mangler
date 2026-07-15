@@ -4,6 +4,14 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v20
+
+- **Test detection, not just the transform** — progressive effects now have a **Test detection**
+  button in the Test panel, checking `trigger.keywords`/`trigger.llmCondition` against the sample
+  text without leaving the settings panel: keyword mode reports the match instantly, LLM mode
+  fires a real classification call and shows the raw rating. Never touches the effect's actual
+  level/turns/locked state.
+
 ## v19
 
 - **`{{responding_to}}` placeholder for `llm-rewrite`** — a short "speaker: excerpt" line for the

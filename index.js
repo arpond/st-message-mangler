@@ -259,8 +259,9 @@ async function generateRawWithRetry(params, label) {
 // Detection-only alternative to generateRawWithRetry: if the user has picked a specific
 // Connection Manager profile for detection (settings.detectionConnectionProfileId), route the
 // classification call through that profile instead of the main connection — lets detection use
-// a cheaper/faster/different model than whatever's driving the actual roleplay. Only used by
-// runBatchedLlmDetectors; runLlmRewrite always uses the main connection.
+// a cheaper/faster/different model than whatever's driving the actual roleplay. Used by
+// runBatchedLlmDetectors and the Test panel's detection check; runLlmRewrite always uses the
+// main connection.
 async function runDetectionGenerate(prompt, responseLength, label) {
     const profileId = getSettings().detectionConnectionProfileId;
     if (!profileId) return generateRawWithRetry({ prompt, responseLength }, label);
@@ -361,6 +362,31 @@ async function runBatchedLlmDetectors(effects) {
         log(`Batched LLM detector updated ${effects.length} effect(s) in one call.`);
     } catch (err) {
         warn('Batched LLM detector failed:', err.message);
+    }
+}
+
+// Test-only detection check for the settings-panel Test panel — never touches persisted
+// level/turns/locked state (unlike the real pipeline's updateAndGetEffectLevel/applyLlmRating).
+// Keyword mode is synchronous, no LLM call; LLM mode fires a real classification call against
+// the sample text (not real chat history) and returns the raw rating without applying it.
+async function runDetectionTest(effect, sampleText) {
+    if (effect.trigger.detector === 'keyword') {
+        if (matchesKeywordList(sampleText, effect.trigger.dispelKeywords)) {
+            return 'Dispel keyword matched — would force level to 0.';
+        }
+        const hit = matchesKeywordList(sampleText, effect.trigger.keywords);
+        return `Keyword match: ${hit ? 'yes' : 'no'} (would ${hit ? `increment by ${effect.trigger.incrementPerHit}` : `decay by ${effect.trigger.decayPerTurn}`}).`;
+    }
+    const prompt = `Consider the condition below and rate how strongly it currently applies to the scene, from 0 (not at all) to 10 (extremely). `
+        + `You may reason about it first, but your response MUST end with exactly one line in this exact format and nothing else after it:\nrating: <rating 0-10>\n\n`
+        + `Condition:\n${effect.trigger.llmCondition || effect.label}\n\nScene:\n${wrapUntrusted(sampleText)}${INJECTION_GUARD}`;
+    try {
+        const result = await runDetectionGenerate(prompt, 200, `Detection test "${effect.label}"`);
+        const cleaned = removeReasoningFromString(result);
+        const match = cleaned.match(/rating[^\d]{0,20}(\d+(?:\.\d+)?)/i);
+        return match ? `Classifier rating: ${Math.min(10, Math.max(0, Number(match[1])))}/10` : `No rating found in response: ${cleaned.slice(0, 200)}`;
+    } catch (err) {
+        return `Detection test failed: ${err.message}`;
     }
 }
 
@@ -930,6 +956,10 @@ function renderTestPanel(effect) {
             ${cuePreview}
             ${scalePreview}
             <div class="menu_button menu_button_icon st_mangler_test_run"><i class="fa-solid fa-play"></i> Run test</div>
+            ${effect.trigger.mode === 'progressive' ? `
+            <div class="menu_button menu_button_icon st_mangler_test_detect" title="Check trigger.keywords/trigger.llmCondition against the sample text, without applying it">
+                <i class="fa-solid fa-magnifying-glass"></i> Test detection
+            </div>` : ''}
             <textarea class="text_pole textarea_compact st_mangler_test_output" rows="2" readonly placeholder="Result appears here"></textarea>
         </div>`;
 }
@@ -1460,6 +1490,19 @@ function addSettingsUI() {
         output.val('Running...');
         try {
             output.val(await applySingleEffect(input.val(), effect, level));
+        } catch (err) {
+            output.val(`Error: ${err.message}`);
+        }
+    });
+
+    $('#st_mangler_effects').on('click', '.st_mangler_test_detect', async function () {
+        const row = $(this).closest('.st_mangler_effect');
+        const effect = settings.effects.find(e => e.id === row.data('effect-id'));
+        if (!effect) return;
+        const output = row.find('.st_mangler_test_output');
+        output.val('Testing detection...');
+        try {
+            output.val(await runDetectionTest(effect, row.find('.st_mangler_test_input').val()));
         } catch (err) {
             output.val(`Error: ${err.message}`);
         }
