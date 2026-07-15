@@ -535,6 +535,28 @@ function clearAllAwarenessCues(settings) {
     }
 }
 
+// SillyTavern's fork/branch feature (createBranch/saveChat in core) merges the ORIGINAL chat's
+// full chat_metadata into the new branch's — including our per-effect level/turns/locked state,
+// which reflects wherever the original chat's levels happened to be at the moment of forking, not
+// at the message the fork actually started from (chat_metadata has no per-message history the
+// way messages themselves do — a fork from message #2 of a 50-message scene could otherwise
+// arrive already locked at level 1.0 from something that only happened at message #40). Detected
+// via chat_metadata.main_chat (set only on forked/branch chats) plus our own one-time marker, so
+// this only fires once per freshly-forked chat — never on a normal switch back into a branch
+// that's already been reset.
+function resetLevelsOnFreshFork(settings) {
+    const metadata = getChatMetadata();
+    if (!metadata.main_chat || metadata.st_mangler_fork_reset_done) return;
+    for (const effect of settings.effects) {
+        setEffectLevel(effect, 0);
+        setEffectTurnsActive(effect, 0);
+        setEffectLocked(effect, false);
+    }
+    metadata.st_mangler_fork_reset_done = true;
+    context.saveMetadataDebounced();
+    log('Forked/branched chat detected — reset all effect levels (inherited chat_metadata reflected the source chat\'s current state, not the fork point).');
+}
+
 // Injects a short live cue into the prompt (via setExtensionPrompt, same mechanism the
 // searxng-search extension uses) while an effect is currently active, so the character can react
 // to this specific moment instead of only ever knowing about the mechanic through static World
@@ -1553,6 +1575,10 @@ addSettingsUI();
 registerSlashCommands();
 context.eventSource.on(context.eventTypes.MESSAGE_SENT, onMessageSent);
 context.eventSource.on(context.eventTypes.CHARACTER_MESSAGE_RENDERED, onCharacterMessageRendered);
-context.eventSource.on(context.eventTypes.CHAT_CHANGED, () => clearAllAwarenessCues(getSettings()));
+context.eventSource.on(context.eventTypes.CHAT_CHANGED, () => {
+    const settings = getSettings();
+    clearAllAwarenessCues(settings);
+    resetLevelsOnFreshFork(settings);
+});
 context.eventSource.on(context.eventTypes.CONNECTION_PROFILE_LOADED, () => refreshDetectionProfileDropdown(getSettings()));
 log('Extension loaded.');

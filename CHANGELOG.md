@@ -4,6 +4,14 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v26
+
+- **Fixed effect levels carrying over incorrectly when forking/branching a chat** — SillyTavern's
+  fork feature copies the source chat's *current* metadata into the new branch, not a snapshot
+  from the message the fork actually started from, so an effect could arrive already escalated
+  or locked with nothing in the forked history to justify it. Every effect's level/turns-active/
+  locked state now resets once, automatically, the first time a freshly forked chat is opened.
+
 ## v25
 
 - **Debug logging now includes the full prompt sent to the model** — for `llm-rewrite`, the

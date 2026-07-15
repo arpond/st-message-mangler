@@ -367,6 +367,12 @@ seeing one of these, this is likely why.
   on a Continue.** Fixed — Continue re-fires the same rendering hook for what's really one
   interrupted turn, not a new one; the extension now skips re-firing the LLM detector batch for a
   continuation, so the scene only gets rated once per actual turn.
+- **Forking/branching a chat from an earlier message brought an effect's level along with it —
+  sometimes already locked or escalated despite the forked history never showing why.**
+  Fixed — SillyTavern's fork feature copies the *source* chat's current metadata, not a
+  snapshot from the message you forked from (there's no per-message level history to copy from).
+  Every effect's level/turns-active/locked state now resets once, automatically, the first time
+  a freshly forked chat is opened.
 
 ## How it works
 
