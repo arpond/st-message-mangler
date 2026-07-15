@@ -1,0 +1,8 @@
+{
+  "name": "st-message-mangler",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}
