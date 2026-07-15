@@ -6,6 +6,7 @@
 // actually receives (see public/script.js sendMessageAsUser()).
 
 import { removeReasoningFromString } from '../../../reasoning.js';
+import { extension_prompt_types, extension_prompt_roles } from '../../../../script.js';
 
 const context = SillyTavern.getContext();
 const MODULE_NAME = 'st_message_mangler';
@@ -37,6 +38,7 @@ function defaultEffectShape(type = 'regex') {
         enabled: true,
         type,
         target: 'user', // 'user' | 'character' | 'both' — which speaker's message the transform is applied to
+        awarenessCue: '', // optional; injected into the prompt via setExtensionPrompt only while this effect is active
         trigger: defaultTrigger(),
         regex: { pattern: '', flags: 'gi', replacement: '' },
         drunk: { intensity: 0.3 },
@@ -499,6 +501,31 @@ function effectAppliesToTarget(effect, source) {
     return effect.target === 'both' || effect.target === source;
 }
 
+function awarenessCueKey(effect) {
+    return `st_mangler_awareness_${effect.id}`;
+}
+
+// Injects a short live cue into the prompt (via setExtensionPrompt, same mechanism the
+// searxng-search extension uses) while an effect is currently active, so the character can react
+// to this specific moment instead of only ever knowing about the mechanic through static World
+// Info lore. Cleared (empty value, which core's getExtensionPrompt filters out) whenever the
+// effect has no cue configured, isn't active, or is disabled — never left dangling from a
+// previous turn.
+function updateAwarenessCue(effect, level, active) {
+    const key = awarenessCueKey(effect);
+    if (!effect.awarenessCue || !active) {
+        context.setExtensionPrompt(key, '', extension_prompt_types.IN_CHAT, 0);
+        return;
+    }
+    // Same 0.99 cap as runLlmRewrite's promptLevel — routes around the same local-model quirk
+    // where the literal maximum reads as "weak" rather than maximum.
+    const promptLevel = Math.min(level, 0.99);
+    const cue = effect.awarenessCue
+        .replaceAll('{{level}}', promptLevel.toFixed(2))
+        .replaceAll('{{level_pct}}', String(Math.round(promptLevel * 100)));
+    context.setExtensionPrompt(key, cue, extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
+}
+
 async function applyEffects(originalText, message, settings, source) {
     const budget = { remaining: settings.maxLlmCallsPerMessage };
     debugLog(`applyEffects: starting for source=${source}, ${settings.effects.length} effect(s) configured, LLM call budget=${budget.remaining}`);
@@ -532,6 +559,7 @@ async function applyEffects(originalText, message, settings, source) {
     for (const effect of settings.effects) {
         if (!effect.enabled) {
             debugLog(`applyEffects: "${effect.label}" skipped — disabled.`);
+            updateAwarenessCue(effect, 0, false);
             continue;
         }
 
@@ -547,6 +575,11 @@ async function applyEffects(originalText, message, settings, source) {
             : shouldDetectFromSource(effect, source)
                 ? updateAndGetEffectLevel(effect, message)
                 : getEffectLevel(effect);
+
+        // Awareness cue reflects the effect's true current state regardless of target — an
+        // effect can be "active" (driving the narrative cue) without this speaker's message
+        // being the one it transforms.
+        updateAwarenessCue(effect, level, level >= effect.trigger.minLevelToApply);
 
         if (!effectAppliesToTarget(effect, source)) {
             debugLog(`applyEffects: "${effect.label}" — detection updated, but target=${effect.target} excludes ${source}; no transform.`);
@@ -900,6 +933,12 @@ function renderEffectRow(effect) {
                     </select>
                 </label>
                 <label>
+                    Live awareness cue (optional) — injected into the prompt only while this
+                    effect is active, so the character reacts to this specific moment (independent
+                    of any static World Info entry). Supports <code>{{level}}</code> / <code>{{level_pct}}</code>:
+                    ${field('textarea', 'awarenessCue', effect.awarenessCue, 'rows="2" placeholder="e.g. [System: the compulsion is currently at {{level_pct}}% — let it visibly affect your dialogue.]"')}
+                </label>
+                <label>
                     Trigger:
                     <select class="st_mangler_field" data-field="trigger.mode">
                         <option value="always" ${effect.trigger.mode === 'always' ? 'selected' : ''}>Always (every message)</option>
@@ -1115,6 +1154,8 @@ function addSettingsUI() {
 
     $('#st_mangler_effects').on('click', '.st_mangler_effect_delete', function () {
         const id = $(this).closest('.st_mangler_effect').data('effect-id');
+        const effect = settings.effects.find(e => e.id === id);
+        if (effect) context.setExtensionPrompt(awarenessCueKey(effect), '', extension_prompt_types.IN_CHAT, 0);
         settings.effects = settings.effects.filter(e => e.id !== id);
         expandedEffectIds.delete(id);
         refreshEffectList(settings);
