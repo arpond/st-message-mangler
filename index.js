@@ -339,6 +339,7 @@ async function runBatchedLlmDetectors(effects) {
     // mostly reasoning + a handful of short answer lines, not text proportional to the scene.
     const responseLength = Math.min(800, 200 + effects.length * 100);
     debugLog(`runBatchedLlmDetectors: promptLength=${prompt.length} chars, responseLength cap=${responseLength} tokens, effect ids=[${effects.map(e => e.id).join(', ')}]`);
+    debugLog(`runBatchedLlmDetectors: prompt sent: ${JSON.stringify(prompt)}`);
     try {
         const result = await runDetectionGenerate(prompt, responseLength, 'Batched LLM detector');
         debugLog(`runBatchedLlmDetectors: raw result (${result.length} chars): ${JSON.stringify(result.slice(0, 500))}`);
@@ -382,6 +383,7 @@ async function runDetectionTest(effect, sampleText) {
     const prompt = `Consider the condition below and rate how strongly it currently applies to the scene, from 0 (not at all) to 10 (extremely). `
         + `You may reason about it first, but your response MUST end with exactly one line in this exact format and nothing else after it:\nrating: <rating 0-10>\n\n`
         + `Condition:\n${effect.trigger.llmCondition || effect.label}\n\nScene:\n${wrapUntrusted(sampleText)}${INJECTION_GUARD}`;
+    debugLog(`runDetectionTest "${effect.label}": prompt sent: ${JSON.stringify(prompt)}`);
     try {
         const result = await runDetectionGenerate(prompt, 200, `Detection test "${effect.label}"`);
         const cleaned = removeReasoningFromString(result);
@@ -476,6 +478,7 @@ async function runLlmRewrite(text, effect, level, trueOriginal, respondingTo = '
     // the old hardcoded 600.
     const responseLength = Math.min(effect.llmRewrite.maxResponseTokens, Math.max(80, Math.ceil(text.length / 3) * 6));
     debugLog(`runLlmRewrite "${effect.label}": level=${level.toFixed(2)} (sent to model as ${promptLevel.toFixed(2)}), promptLength=${prompt.length} chars, responseLength cap=${responseLength} tokens`);
+    debugLog(`runLlmRewrite "${effect.label}": prompt sent: ${JSON.stringify(prompt)}`);
     try {
         const result = await generateRawWithRetry({ prompt, responseLength }, `llm-rewrite effect "${effect.label}"`);
         debugLog(`runLlmRewrite "${effect.label}": raw result (${result.length} chars): ${JSON.stringify(result.slice(0, 300))}`);

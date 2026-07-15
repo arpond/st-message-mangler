@@ -4,6 +4,11 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v25
+
+- **Debug logging now includes the full prompt sent to the model** — for `llm-rewrite`, the
+  batched LLM detector, and the Test panel's detection check, not just its length.
+
 ## v24
 
 - **Configurable max response length for `llm-rewrite`** — the response-length ceiling (was a

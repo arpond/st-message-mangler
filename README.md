@@ -83,7 +83,9 @@ Open the **Message Mangler** drawer in the Extensions settings panel.
 
 There's a `debug` setting with no UI control — enable it from the browser console when you need
 to trace exactly what the pipeline is doing for a message (current level per effect, whether the
-trigger threshold was reached, whether a rewrite actually happened, detector batching, etc.):
+trigger threshold was reached, whether a rewrite actually happened, detector batching, etc.),
+including the full text of every prompt actually sent to your connected model (llm-rewrite,
+batched LLM detection, and the Test panel's detection check):
 
 ```js
 const ctx = SillyTavern.getContext();
