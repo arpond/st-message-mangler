@@ -136,7 +136,10 @@ model** setting (default `0.99`) that caps what's actually substituted into
 level used for trigger/threshold logic is untouched, only what these prompts see is nudged just
 short of the literal ceiling. If your model doesn't have this quirk, set it to `1` to disable
 (0.99 vs 1.00 reads identically in practice on models that don't have this quirk, so the default
-is harmless either way). Example:
+is harmless either way). The awareness cue also supports `{{trend}}` — `"escalating"`,
+`"de-escalating"`, or `"steady"`, reflecting how the level changed since last turn — an easier
+signal for the character to react to than a raw number or a literal before/after text diff.
+Example:
 
 **Scaling mode: Freeform vs. Structured steps.** By default (**Freeform**), any level-dependent
 behavior — "below 0.3 do X, 0.3-0.7 do Y, above 0.9 do Z" — has to be written as prose in the

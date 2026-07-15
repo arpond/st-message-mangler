@@ -10,6 +10,7 @@ import { extension_prompt_types, extension_prompt_roles } from '../../../../scri
 import {
     clamp01, escapeRegExp, matchesKeywordList, applyRegexEffect, applyDrunk,
     looksDegenerate, escapeHtmlForDisplay, wordDiffHighlight, backfillDefaults, resolveAwarenessCue,
+    resolveLevelTrend,
     resolveScaleStep, splitContinuationSuffix, generateScaleSteps, sanitizeScaleSteps,
     buildRespondingToContext, buildSceneContext,
 } from './lib/pure.js';
@@ -563,13 +564,13 @@ function resetLevelsOnFreshFork(settings) {
 // Info lore. Cleared (empty value, which core's getExtensionPrompt filters out) whenever the
 // effect has no cue configured, isn't active, or is disabled — never left dangling from a
 // previous turn.
-function updateAwarenessCue(effect, level, active) {
+function updateAwarenessCue(effect, level, active, trend = 'steady') {
     const key = awarenessCueKey(effect);
     if (!effect.awarenessCue || !active) {
         context.setExtensionPrompt(key, '', extension_prompt_types.IN_CHAT, 0);
         return;
     }
-    const cue = resolveAwarenessCue(effect.awarenessCue, level, effect.promptLevelCap);
+    const cue = resolveAwarenessCue(effect.awarenessCue, level, effect.promptLevelCap, trend);
     context.setExtensionPrompt(key, cue, extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
 }
 
@@ -618,6 +619,12 @@ async function applyEffects(originalText, message, settings, source, isContinuat
             continue;
         }
 
+        // Read before updateAndGetEffectLevel mutates the persisted level, so {{trend}} can
+        // compare this turn's result against what it actually was a moment ago. 'always'-mode
+        // effects have no persisted level history at all (level is a hardcoded constant 1 every
+        // time) — nothing to trend, so they're always 'steady'.
+        const previousLevel = effect.trigger.mode === 'always' ? 1 : getEffectLevel(effect);
+
         // Detection runs regardless of target — an effect can detect from a speaker it doesn't
         // transform (e.g. target: 'user' but detectSource: 'both', so the character's dialogue
         // still builds the level even though only the user's own messages get rewritten).
@@ -630,11 +637,12 @@ async function applyEffects(originalText, message, settings, source, isContinuat
             : shouldDetectFromSource(effect, source)
                 ? updateAndGetEffectLevel(effect, originalText)
                 : getEffectLevel(effect);
+        const trend = effect.trigger.mode === 'always' ? 'steady' : resolveLevelTrend(previousLevel, level);
 
         // Awareness cue reflects the effect's true current state regardless of target — an
         // effect can be "active" (driving the narrative cue) without this speaker's message
         // being the one it transforms.
-        updateAwarenessCue(effect, level, level >= effect.trigger.minLevelToApply);
+        updateAwarenessCue(effect, level, level >= effect.trigger.minLevelToApply, trend);
 
         if (!effectAppliesToTarget(effect, source)) {
             debugLog(`applyEffects: "${effect.label}" — detection updated, but target=${effect.target} excludes ${source}; no transform.`);
@@ -1086,7 +1094,7 @@ function renderEffectRow(effect) {
                         </select>
                     </label>
                     <label>
-                        Live awareness cue (optional)${infoIcon('Injected into the prompt only while this effect is active, so the character reacts to this specific moment (independent of any static World Info entry). Supports {{level}} / {{level_pct}}.')}
+                        Live awareness cue (optional)${infoIcon('Injected into the prompt only while this effect is active, so the character reacts to this specific moment (independent of any static World Info entry). Supports {{level}} / {{level_pct}} / {{trend}} (one of "escalating", "de-escalating", or "steady" — how the level changed since last turn, an easier signal for the model than a raw number or text diff).')}
                         ${field('textarea', 'awarenessCue', effect.awarenessCue, 'rows="2" placeholder="e.g. [System: the compulsion is currently at {{level_pct}}% — let it visibly affect your dialogue.]"')}
                     </label>
                     <label>

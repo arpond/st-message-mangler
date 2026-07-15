@@ -4,6 +4,12 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v27
+
+- **`{{trend}}` placeholder for the awareness cue** — `"escalating"`, `"de-escalating"`, or
+  `"steady"`, reflecting how an effect's level changed since last turn. A simpler signal for the
+  character to react to than a raw number or a literal before/after text diff.
+
 ## v26
 
 - **Fixed effect levels carrying over incorrectly when forking/branching a chat** — SillyTavern's

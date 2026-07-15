@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
     clamp01, escapeRegExp, matchesKeywordList, applyRegexEffect, applyDrunk,
     looksDegenerate, escapeHtmlForDisplay, wordDiffHighlight, backfillDefaults, resolveAwarenessCue,
+    resolveLevelTrend,
     resolveScaleStep, splitContinuationSuffix, generateScaleSteps, sanitizeScaleSteps,
     buildRespondingToContext, buildSceneContext,
 } from '../lib/pure.js';
@@ -125,6 +126,25 @@ test('resolveAwarenessCue substitutes {{level}} and {{level_pct}}, capped at 0.9
 test('resolveAwarenessCue respects a custom cap', () => {
     assert.equal(resolveAwarenessCue('cue at {{level}} / {{level_pct}}%', 1, 1), 'cue at 1.00 / 100%');
     assert.equal(resolveAwarenessCue('cue at {{level}} / {{level_pct}}%', 1, 0.8), 'cue at 0.80 / 80%');
+});
+
+test('resolveAwarenessCue substitutes {{trend}}, defaulting to steady', () => {
+    assert.equal(resolveAwarenessCue('it is {{trend}}', 1), 'it is steady');
+    assert.equal(resolveAwarenessCue('it is {{trend}}', 1, 0.99, 'escalating'), 'it is escalating');
+});
+
+test('resolveLevelTrend detects escalating and de-escalating beyond the epsilon', () => {
+    assert.equal(resolveLevelTrend(0.3, 0.6), 'escalating');
+    assert.equal(resolveLevelTrend(0.6, 0.3), 'de-escalating');
+});
+
+test('resolveLevelTrend treats an unchanged level as steady', () => {
+    assert.equal(resolveLevelTrend(0.5, 0.5), 'steady');
+});
+
+test('resolveLevelTrend absorbs small drift within the epsilon as steady', () => {
+    assert.equal(resolveLevelTrend(0.5, 0.51), 'steady');
+    assert.equal(resolveLevelTrend(0.5, 0.49), 'steady');
 });
 
 test('wordDiffHighlight marks only the words that actually changed', () => {
