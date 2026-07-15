@@ -103,10 +103,13 @@ the pipeline — what this effect actually rewrites, which may already reflect e
 `{{true_original}}` (the true pre-pipeline text, before any effect in this chain ran — lets a
 template reference "what the user actually typed" separately from "the current state," so a
 later effect can avoid blindly undoing an earlier one), `{{level}}` (0–1 trigger strength, `1`
-for `always`-mode effects), and `{{level_pct}}` (the same strength as a whole-number 0–100
-percentage instead) — pick whichever `level` form reads more naturally in your template.
-SillyTavern's own macros (`{{user}}`, `{{char}}`, etc.) also work in the template — they're
-substituted by SillyTavern itself after this extension's own placeholders are resolved.
+for `always`-mode effects), `{{level_pct}}` (the same strength as a whole-number 0–100
+percentage instead) — pick whichever `level` form reads more naturally in your template — and
+`{{responding_to}}` (a short "speaker: excerpt" line for the immediately preceding chat message,
+trimmed rather than the full message or character card — empty if there is none, e.g. the very
+first message in a chat). SillyTavern's own macros (`{{user}}`, `{{char}}`, etc.) also work in
+the template — they're substituted by SillyTavern itself after this extension's own placeholders
+are resolved.
 
 **Starting from a template:** the example picker above the template field ("Basic rewrite",
 "Freeform, level-banded prose", "Structured steps") inserts a starting point via **Insert

@@ -4,6 +4,7 @@ import {
     clamp01, escapeRegExp, matchesKeywordList, applyRegexEffect, applyDrunk,
     looksDegenerate, escapeHtmlForDisplay, wordDiffHighlight, backfillDefaults, resolveAwarenessCue,
     resolveScaleStep, splitContinuationSuffix, generateScaleSteps, sanitizeScaleSteps,
+    buildRespondingToContext,
 } from '../lib/pure.js';
 
 test('clamp01 clamps to [0, 1]', () => {
@@ -290,4 +291,20 @@ test('sanitizeScaleSteps does not warn when thresholds are legitimately distinct
     const warnings = [];
     sanitizeScaleSteps(steps, (...args) => warnings.push(args));
     assert.equal(warnings.length, 0);
+});
+
+test('buildRespondingToContext returns empty string with no preceding message', () => {
+    assert.equal(buildRespondingToContext(undefined), '');
+    assert.equal(buildRespondingToContext(null), '');
+});
+
+test('buildRespondingToContext includes the speaker and full text when under the limit', () => {
+    const result = buildRespondingToContext({ name: 'Aria', mes: 'The knight drew his sword.' });
+    assert.equal(result, 'Aria: "The knight drew his sword."');
+});
+
+test('buildRespondingToContext truncates a long message with an ellipsis', () => {
+    const longText = 'x'.repeat(200);
+    const result = buildRespondingToContext({ name: 'Aria', mes: longText }, 150);
+    assert.equal(result, `Aria: "${'x'.repeat(150)}…"`);
 });

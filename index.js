@@ -11,6 +11,7 @@ import {
     clamp01, escapeRegExp, matchesKeywordList, applyRegexEffect, applyDrunk,
     looksDegenerate, escapeHtmlForDisplay, wordDiffHighlight, backfillDefaults, resolveAwarenessCue,
     resolveScaleStep, splitContinuationSuffix, generateScaleSteps, sanitizeScaleSteps,
+    buildRespondingToContext,
 } from './lib/pure.js';
 
 const context = SillyTavern.getContext();
@@ -407,7 +408,7 @@ function updateAndGetEffectLevel(effect, detectionText) {
 // text — it must be resolved before the message can be finalized/sent. Fails open: a broken
 // connection, a bad prompt, or a degenerate/runaway generation all leave the text unchanged
 // rather than injecting garbage into the chat.
-async function runLlmRewrite(text, effect, level, trueOriginal) {
+async function runLlmRewrite(text, effect, level, trueOriginal, respondingTo = '') {
     // Some models respond to the literal maximum value (1.00 / 100%) with a noticeably weaker
     // result than a near-maximum one (observed repeatedly: 0.91 reliably strong, 1.00
     // consistently weak, across multiple prompt rewordings that ruled out phrasing as the
@@ -434,6 +435,7 @@ async function runLlmRewrite(text, effect, level, trueOriginal) {
         .replaceAll('{{level}}', promptLevel.toFixed(2))
         .replaceAll('{{level_pct}}', String(Math.round(promptLevel * 100)))
         .replaceAll('{{scale_instruction}}', scaleInstruction)
+        .replaceAll('{{responding_to}}', respondingTo ? wrapUntrusted(respondingTo, 'responding_to_context') : '')
         + INJECTION_GUARD
         + '\n\nRespond with ONLY the rewritten message — no reasoning, no explanation, no preamble.';
     // Cap output length relative to the input as a cheap backstop against runaway/looping
@@ -466,11 +468,11 @@ async function runLlmRewrite(text, effect, level, trueOriginal) {
 
 // Single point of type dispatch, shared by the real pipeline below and the settings panel's
 // per-effect "Test" button (which runs one effect in isolation at level=1, no trigger involved).
-async function applySingleEffect(text, effect, level, trueOriginal = text) {
+async function applySingleEffect(text, effect, level, trueOriginal = text, respondingTo = '') {
     switch (effect.type) {
         case 'regex': return applyRegexEffect(text, effect.regex, warn);
         case 'drunk': return applyDrunk(text, effect.drunk.intensity * level);
-        case 'llm-rewrite': return runLlmRewrite(text, effect, level, trueOriginal);
+        case 'llm-rewrite': return runLlmRewrite(text, effect, level, trueOriginal, respondingTo);
         default: return text;
     }
 }
@@ -519,7 +521,7 @@ function updateAwarenessCue(effect, level, active) {
 // the intended behavior for a lookback classifier, but re-rating the *same* turn a second time
 // just because it got interrupted by Continue would double-apply cumulative/cumulative-lock
 // increments (and waste a call for absolute mode, which just overwrites anyway).
-async function applyEffects(originalText, message, settings, source, isContinuation = false) {
+async function applyEffects(originalText, message, settings, source, isContinuation = false, respondingTo = '') {
     const budget = { remaining: settings.maxLlmCallsPerMessage };
     debugLog(`applyEffects: starting for source=${source}, ${settings.effects.length} effect(s) configured, LLM call budget=${budget.remaining}`);
 
@@ -596,7 +598,7 @@ async function applyEffects(originalText, message, settings, source, isContinuat
             debugLog(`applyEffects: "${effect.label}" (${effect.type}) proceeding at level=${level.toFixed(2)}`);
         }
         const before = text;
-        text = await applySingleEffect(text, effect, level, originalText);
+        text = await applySingleEffect(text, effect, level, originalText, respondingTo);
         debugLog(`applyEffects: "${effect.label}" ${text === before ? 'made no change' : 'changed the text'}.`);
     }
     debugLog(`applyEffects: done — text ${text === originalText ? 'unchanged overall' : 'was rewritten overall'}.`);
@@ -627,7 +629,8 @@ async function onMessageSent(chatId) {
     }
 
     const original = message.mes;
-    const mangled = await applyEffects(original, message, settings, 'user');
+    const respondingTo = buildRespondingToContext(context.chat[chatId - 1]);
+    const mangled = await applyEffects(original, message, settings, 'user', false, respondingTo);
     if (mangled === original) {
         debugLog(`onMessageSent: chatId=${chatId} — message unchanged, not rewritten.`);
         return;
@@ -683,7 +686,8 @@ async function onCharacterMessageRendered(chatId) {
         splitContinuationSuffix(currentMes, message.extra.mangler_mangled_snapshot);
     const trueOriginalPrefix = isContinuation ? (message.extra.mangler_true_snapshot ?? mangledPrefix) : '';
 
-    const mangledSuffix = await applyEffects(newRawPortion, message, settings, 'character', isContinuation);
+    const respondingTo = buildRespondingToContext(context.chat[chatId - 1]);
+    const mangledSuffix = await applyEffects(newRawPortion, message, settings, 'character', isContinuation, respondingTo);
     const mangled = mangledPrefix + mangledSuffix;
     const trueOriginal = trueOriginalPrefix + newRawPortion;
 
@@ -875,7 +879,7 @@ function renderTypeFields(effect) {
             return `
                 <div class="st_mangler_type_fields">
                     <small>Calls your connected AI model to rewrite the text and waits for the reply — sending
-                    a message will pause for however long a normal generation takes.${infoIcon('Instructions for how to rewrite the message. Placeholders available: {{original}} = the message text so far (this is what gets rewritten, i.e. current pipeline state after any earlier effects); {{true_original}} = the true pre-pipeline text, before any effect ran; {{level}} = current trigger strength as a number from 0 to 1 (1 for "Always" effects); {{level_pct}} = the same strength as a whole-number percentage (0-100) instead; {{scale_instruction}} = (Structured steps mode only) the text of whichever step\'s threshold applies at the current level, chosen in code rather than by the model reading a number. Some models respond more reliably to one level form than the other — the literal numeral "1" is heavily associated with "lowest"/"level one" in a lot of training data, which can make a model treat {{level}}=1.00 as weak rather than maximum; if you see that, try {{level_pct}} instead (100 doesn\'t carry the same "lowest" association), or switch to Structured steps so band selection never depends on the model reading a number at all. SillyTavern\'s own macros like {{user}}/{{char}} also work here.')}</small>
+                    a message will pause for however long a normal generation takes.${infoIcon('Instructions for how to rewrite the message. Placeholders available: {{original}} = the message text so far (this is what gets rewritten, i.e. current pipeline state after any earlier effects); {{true_original}} = the true pre-pipeline text, before any effect ran; {{level}} = current trigger strength as a number from 0 to 1 (1 for "Always" effects); {{level_pct}} = the same strength as a whole-number percentage (0-100) instead; {{scale_instruction}} = (Structured steps mode only) the text of whichever step\'s threshold applies at the current level, chosen in code rather than by the model reading a number; {{responding_to}} = a short "speaker: excerpt" line for the immediately preceding chat message (trimmed, not the full message or character card) — empty if there is none. Some models respond more reliably to one level form than the other — the literal numeral "1" is heavily associated with "lowest"/"level one" in a lot of training data, which can make a model treat {{level}}=1.00 as weak rather than maximum; if you see that, try {{level_pct}} instead (100 doesn\'t carry the same "lowest" association), or switch to Structured steps so band selection never depends on the model reading a number at all. SillyTavern\'s own macros like {{user}}/{{char}} also work here.')}</small>
                     <div class="st_mangler_template_helper">
                         <select class="st_mangler_template_example_select">
                             ${PROMPT_TEMPLATE_EXAMPLES.map(e => `<option value="${e.id}">${e.label}</option>`).join('')}

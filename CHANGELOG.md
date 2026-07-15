@@ -4,6 +4,12 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v19
+
+- **`{{responding_to}}` placeholder for `llm-rewrite`** — a short "speaker: excerpt" line for the
+  immediately preceding chat message (trimmed, not the full message or character card), so a
+  rewrite can know who/what it's reacting to without pulling in full scene text.
+
 ## v18
 
 - **Configurable prompt-level cap** — the `0.99` cap on `{{level}}`/`{{level_pct}}` substitution
