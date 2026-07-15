@@ -9,6 +9,9 @@ successive rounds of development.
 - **Fixed keyword-trigger double-counting across `Continue`** — keyword and dispel-keyword
   matching now only scans the newly generated portion of a continued AI message, instead of
   re-scanning (and re-incrementing on) the already-mangled earlier text every time.
+- **Fixed LLM-classification double-counting across `Continue`** — the batched LLM detector no
+  longer fires again for a Continue of the same message; `cumulative`/`cumulative-lock` triggers
+  no longer get an extra rating applied for what's really one interrupted turn.
 
 ## v16
 

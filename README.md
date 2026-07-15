@@ -346,6 +346,10 @@ seeing one of these, this is likely why.
   Fixed — keyword (and dispel-keyword) matching now only scans the newly generated portion of a
   continued message, instead of re-scanning the already-mangled earlier text and re-counting a
   keyword hit that already applied on an earlier turn.
+- **An LLM-classification progressive trigger (`cumulative`/`cumulative-lock`) also jumped extra
+  on a Continue.** Fixed — Continue re-fires the same rendering hook for what's really one
+  interrupted turn, not a new one; the extension now skips re-firing the LLM detector batch for a
+  continuation, so the scene only gets rated once per actual turn.
 
 ## How it works
 

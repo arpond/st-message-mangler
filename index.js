@@ -510,13 +510,21 @@ function updateAwarenessCue(effect, level, active) {
     context.setExtensionPrompt(key, cue, extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
 }
 
-async function applyEffects(originalText, message, settings, source) {
+// isContinuation: true when this call is reprocessing the tail end of a Continue rather than a
+// genuinely new incoming message (see splitContinuationSuffix in onCharacterMessageRendered).
+// Skips firing the LLM detector batch in that case — rating a growing scene across real turns is
+// the intended behavior for a lookback classifier, but re-rating the *same* turn a second time
+// just because it got interrupted by Continue would double-apply cumulative/cumulative-lock
+// increments (and waste a call for absolute mode, which just overwrites anyway).
+async function applyEffects(originalText, message, settings, source, isContinuation = false) {
     const budget = { remaining: settings.maxLlmCallsPerMessage };
     debugLog(`applyEffects: starting for source=${source}, ${settings.effects.length} effect(s) configured, LLM call budget=${budget.remaining}`);
 
     const dueLlmDetectors = settings.effects.filter(e => e.enabled && e.trigger.mode === 'progressive'
         && e.trigger.detector === 'llm' && shouldDetectFromSource(e, source));
-    if (dueLlmDetectors.length > 0) {
+    if (dueLlmDetectors.length > 0 && isContinuation) {
+        debugLog(`applyEffects: skipping LLM detector batch for ${dueLlmDetectors.length} effect(s) — continuation of the same message, already rated this turn.`);
+    } else if (dueLlmDetectors.length > 0) {
         if (budget.remaining > 0) {
             budget.remaining--;
             // If any llm-rewrite effect is active this message, run the detector batch inline
@@ -672,7 +680,7 @@ async function onCharacterMessageRendered(chatId) {
         splitContinuationSuffix(currentMes, message.extra.mangler_mangled_snapshot);
     const trueOriginalPrefix = isContinuation ? (message.extra.mangler_true_snapshot ?? mangledPrefix) : '';
 
-    const mangledSuffix = await applyEffects(newRawPortion, message, settings, 'character');
+    const mangledSuffix = await applyEffects(newRawPortion, message, settings, 'character', isContinuation);
     const mangled = mangledPrefix + mangledSuffix;
     const trueOriginal = trueOriginalPrefix + newRawPortion;
 
