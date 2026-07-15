@@ -459,6 +459,17 @@ function awarenessCueKey(effect) {
     return `st_mangler_awareness_${effect.id}`;
 }
 
+// extension_prompts (what setExtensionPrompt writes into) is a shared in-memory map keyed by
+// effect id, not scoped per-chat the way chatMetadata is — so a cue set while active in one chat
+// would otherwise keep bleeding into a different chat's generations until that chat's own
+// applyEffects happened to overwrite it. Called on every chat switch, and when the extension is
+// turned off (disabling should be a full no-op, not leave a stale cue behind).
+function clearAllAwarenessCues(settings) {
+    for (const effect of settings.effects) {
+        context.setExtensionPrompt(awarenessCueKey(effect), '', extension_prompt_types.IN_CHAT, 0);
+    }
+}
+
 // Injects a short live cue into the prompt (via setExtensionPrompt, same mechanism the
 // searxng-search extension uses) while an effect is currently active, so the character can react
 // to this specific moment instead of only ever knowing about the mechanic through static World
@@ -1029,6 +1040,7 @@ function addSettingsUI() {
 
     $('#st_mangler_enabled').on('input', function () {
         settings.enabled = !!$(this).prop('checked');
+        if (!settings.enabled) clearAllAwarenessCues(settings);
         context.saveSettingsDebounced();
     });
     $('#st_mangler_show_original').on('input', function () {
@@ -1166,4 +1178,5 @@ getSettings();
 addSettingsUI();
 context.eventSource.on(context.eventTypes.MESSAGE_SENT, onMessageSent);
 context.eventSource.on(context.eventTypes.CHARACTER_MESSAGE_RENDERED, onCharacterMessageRendered);
+context.eventSource.on(context.eventTypes.CHAT_CHANGED, () => clearAllAwarenessCues(getSettings()));
 log('Extension loaded.');

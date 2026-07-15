@@ -72,6 +72,18 @@ test('looksDegenerate does not flag a short repeat under the threshold', () => {
     assert.equal(looksDegenerate('ha-ha-ha'), false);
 });
 
+test('looksDegenerate catches a phrase repeating with a varying parenthetical aside', () => {
+    const text = 'The knight drew his sword and charged. (Wait, that seems off.) '
+        + 'The knight drew his sword and charged. (Let me reconsider.) '
+        + 'The knight drew his sword and charged.';
+    assert.equal(looksDegenerate(text), true);
+});
+
+test('looksDegenerate does not flag normal prose with a short repeated dialogue tag', () => {
+    const text = '"Hello," she said. "How are you?" she said. "I am fine," she said.';
+    assert.equal(looksDegenerate(text), false);
+});
+
 test('escapeHtmlForDisplay escapes the five HTML-significant characters', () => {
     assert.equal(escapeHtmlForDisplay(`<b>"tom" & 'jerry'</b>`), '&lt;b&gt;&quot;tom&quot; &amp; &#39;jerry&#39;&lt;/b&gt;');
 });
