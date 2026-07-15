@@ -4,7 +4,7 @@ import {
     clamp01, escapeRegExp, matchesKeywordList, applyRegexEffect, applyDrunk,
     looksDegenerate, escapeHtmlForDisplay, wordDiffHighlight, backfillDefaults, resolveAwarenessCue,
     resolveScaleStep, splitContinuationSuffix, generateScaleSteps, sanitizeScaleSteps,
-    buildRespondingToContext,
+    buildRespondingToContext, buildSceneContext,
 } from '../lib/pure.js';
 
 test('clamp01 clamps to [0, 1]', () => {
@@ -307,4 +307,28 @@ test('buildRespondingToContext truncates a long message with an ellipsis', () =>
     const longText = 'x'.repeat(200);
     const result = buildRespondingToContext({ name: 'Aria', mes: longText }, 150);
     assert.equal(result, `Aria: "${'x'.repeat(150)}…"`);
+});
+
+test('buildSceneContext returns empty string when lookback is 0 or negative', () => {
+    const messages = [{ name: 'Aria', mes: 'Hello.' }];
+    assert.equal(buildSceneContext(messages, 0), '');
+    assert.equal(buildSceneContext(messages, -1), '');
+});
+
+test('buildSceneContext returns empty string for an empty message list', () => {
+    assert.equal(buildSceneContext([], 4), '');
+});
+
+test('buildSceneContext takes only the last N messages when lookback is smaller than the list', () => {
+    const messages = [
+        { name: 'Aria', mes: 'One.' },
+        { name: 'User', mes: 'Two.' },
+        { name: 'Aria', mes: 'Three.' },
+    ];
+    assert.equal(buildSceneContext(messages, 2), 'User: Two.\nAria: Three.');
+});
+
+test('buildSceneContext uses the whole list when lookback exceeds its length', () => {
+    const messages = [{ name: 'Aria', mes: 'One.' }, { name: 'User', mes: 'Two.' }];
+    assert.equal(buildSceneContext(messages, 10), 'Aria: One.\nUser: Two.');
 });

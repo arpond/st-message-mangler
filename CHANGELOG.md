@@ -4,6 +4,13 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v22
+
+- **`{{scene}}` lookback placeholder for `llm-rewrite`** — a per-effect **Scene lookback**
+  setting exposes a transcript of the last N chat messages (speaker + full text, same mechanism
+  the LLM detector's classification already uses) as `{{scene}}` in the template. Default
+  lookback is 4 messages; `0` disables it.
+
 ## v21
 
 - **Fixed the effect label not updating its collapsed-row title until reload** — the label is now

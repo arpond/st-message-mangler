@@ -11,7 +11,7 @@ import {
     clamp01, escapeRegExp, matchesKeywordList, applyRegexEffect, applyDrunk,
     looksDegenerate, escapeHtmlForDisplay, wordDiffHighlight, backfillDefaults, resolveAwarenessCue,
     resolveScaleStep, splitContinuationSuffix, generateScaleSteps, sanitizeScaleSteps,
-    buildRespondingToContext,
+    buildRespondingToContext, buildSceneContext,
 } from './lib/pure.js';
 
 const context = SillyTavern.getContext();
@@ -53,6 +53,7 @@ function defaultEffectShape(type = 'regex') {
             promptTemplate: '',
             scaleMode: 'freeform', // 'freeform' | 'steps' — steps resolves {{scale_instruction}} in code instead of relying on the model to read {{level}}/{{level_pct}} and map it onto prose bands itself
             scaleSteps: [], // [{ threshold: 0-1, text }] — used only when scaleMode === 'steps'
+            sceneLookback: 4, // how many recent chat messages to expose as {{scene}} — 0 disables it
         },
     };
 }
@@ -434,7 +435,7 @@ function updateAndGetEffectLevel(effect, detectionText) {
 // text — it must be resolved before the message can be finalized/sent. Fails open: a broken
 // connection, a bad prompt, or a degenerate/runaway generation all leave the text unchanged
 // rather than injecting garbage into the chat.
-async function runLlmRewrite(text, effect, level, trueOriginal, respondingTo = '') {
+async function runLlmRewrite(text, effect, level, trueOriginal, respondingTo = '', recentMessages = []) {
     // Some models respond to the literal maximum value (1.00 / 100%) with a noticeably weaker
     // result than a near-maximum one (observed repeatedly: 0.91 reliably strong, 1.00
     // consistently weak, across multiple prompt rewordings that ruled out phrasing as the
@@ -455,6 +456,7 @@ async function runLlmRewrite(text, effect, level, trueOriginal, respondingTo = '
     const scaleInstruction = effect.llmRewrite.scaleMode === 'steps'
         ? resolveScaleStep(effect.llmRewrite.scaleSteps, level)
         : '';
+    const scene = buildSceneContext(recentMessages, effect.llmRewrite.sceneLookback);
     const prompt = effect.llmRewrite.promptTemplate
         .replaceAll('{{original}}', wrapUntrusted(text))
         .replaceAll('{{true_original}}', trueOriginalBlock)
@@ -462,6 +464,7 @@ async function runLlmRewrite(text, effect, level, trueOriginal, respondingTo = '
         .replaceAll('{{level_pct}}', String(Math.round(promptLevel * 100)))
         .replaceAll('{{scale_instruction}}', scaleInstruction)
         .replaceAll('{{responding_to}}', respondingTo ? wrapUntrusted(respondingTo, 'responding_to_context') : '')
+        .replaceAll('{{scene}}', scene ? wrapUntrusted(scene, 'scene_context') : '')
         + INJECTION_GUARD
         + '\n\nRespond with ONLY the rewritten message — no reasoning, no explanation, no preamble.';
     // Cap output length relative to the input as a cheap backstop against runaway/looping
@@ -494,11 +497,11 @@ async function runLlmRewrite(text, effect, level, trueOriginal, respondingTo = '
 
 // Single point of type dispatch, shared by the real pipeline below and the settings panel's
 // per-effect "Test" button (which runs one effect in isolation at level=1, no trigger involved).
-async function applySingleEffect(text, effect, level, trueOriginal = text, respondingTo = '') {
+async function applySingleEffect(text, effect, level, trueOriginal = text, respondingTo = '', recentMessages = []) {
     switch (effect.type) {
         case 'regex': return applyRegexEffect(text, effect.regex, warn);
         case 'drunk': return applyDrunk(text, effect.drunk.intensity * level);
-        case 'llm-rewrite': return runLlmRewrite(text, effect, level, trueOriginal, respondingTo);
+        case 'llm-rewrite': return runLlmRewrite(text, effect, level, trueOriginal, respondingTo, recentMessages);
         default: return text;
     }
 }
@@ -547,7 +550,7 @@ function updateAwarenessCue(effect, level, active) {
 // the intended behavior for a lookback classifier, but re-rating the *same* turn a second time
 // just because it got interrupted by Continue would double-apply cumulative/cumulative-lock
 // increments (and waste a call for absolute mode, which just overwrites anyway).
-async function applyEffects(originalText, message, settings, source, isContinuation = false, respondingTo = '') {
+async function applyEffects(originalText, message, settings, source, isContinuation = false, respondingTo = '', recentMessages = []) {
     const budget = { remaining: settings.maxLlmCallsPerMessage };
     debugLog(`applyEffects: starting for source=${source}, ${settings.effects.length} effect(s) configured, LLM call budget=${budget.remaining}`);
 
@@ -624,7 +627,7 @@ async function applyEffects(originalText, message, settings, source, isContinuat
             debugLog(`applyEffects: "${effect.label}" (${effect.type}) proceeding at level=${level.toFixed(2)}`);
         }
         const before = text;
-        text = await applySingleEffect(text, effect, level, originalText, respondingTo);
+        text = await applySingleEffect(text, effect, level, originalText, respondingTo, recentMessages);
         debugLog(`applyEffects: "${effect.label}" ${text === before ? 'made no change' : 'changed the text'}.`);
     }
     debugLog(`applyEffects: done — text ${text === originalText ? 'unchanged overall' : 'was rewritten overall'}.`);
@@ -656,7 +659,8 @@ async function onMessageSent(chatId) {
 
     const original = message.mes;
     const respondingTo = buildRespondingToContext(context.chat[chatId - 1]);
-    const mangled = await applyEffects(original, message, settings, 'user', false, respondingTo);
+    const recentMessages = context.chat.slice(0, chatId);
+    const mangled = await applyEffects(original, message, settings, 'user', false, respondingTo, recentMessages);
     if (mangled === original) {
         debugLog(`onMessageSent: chatId=${chatId} — message unchanged, not rewritten.`);
         return;
@@ -713,7 +717,8 @@ async function onCharacterMessageRendered(chatId) {
     const trueOriginalPrefix = isContinuation ? (message.extra.mangler_true_snapshot ?? mangledPrefix) : '';
 
     const respondingTo = buildRespondingToContext(context.chat[chatId - 1]);
-    const mangledSuffix = await applyEffects(newRawPortion, message, settings, 'character', isContinuation, respondingTo);
+    const recentMessages = context.chat.slice(0, chatId);
+    const mangledSuffix = await applyEffects(newRawPortion, message, settings, 'character', isContinuation, respondingTo, recentMessages);
     const mangled = mangledPrefix + mangledSuffix;
     const trueOriginal = trueOriginalPrefix + newRawPortion;
 
@@ -905,7 +910,7 @@ function renderTypeFields(effect) {
             return `
                 <div class="st_mangler_type_fields">
                     <small>Calls your connected AI model to rewrite the text and waits for the reply — sending
-                    a message will pause for however long a normal generation takes.${infoIcon('Instructions for how to rewrite the message. Placeholders available: {{original}} = the message text so far (this is what gets rewritten, i.e. current pipeline state after any earlier effects); {{true_original}} = the true pre-pipeline text, before any effect ran; {{level}} = current trigger strength as a number from 0 to 1 (1 for "Always" effects); {{level_pct}} = the same strength as a whole-number percentage (0-100) instead; {{scale_instruction}} = (Structured steps mode only) the text of whichever step\'s threshold applies at the current level, chosen in code rather than by the model reading a number; {{responding_to}} = a short "speaker: excerpt" line for the immediately preceding chat message (trimmed, not the full message or character card) — empty if there is none. Some models respond more reliably to one level form than the other — the literal numeral "1" is heavily associated with "lowest"/"level one" in a lot of training data, which can make a model treat {{level}}=1.00 as weak rather than maximum; if you see that, try {{level_pct}} instead (100 doesn\'t carry the same "lowest" association), or switch to Structured steps so band selection never depends on the model reading a number at all. SillyTavern\'s own macros like {{user}}/{{char}} also work here.')}</small>
+                    a message will pause for however long a normal generation takes.${infoIcon('Instructions for how to rewrite the message. Placeholders available: {{original}} = the message text so far (this is what gets rewritten, i.e. current pipeline state after any earlier effects); {{true_original}} = the true pre-pipeline text, before any effect ran; {{level}} = current trigger strength as a number from 0 to 1 (1 for "Always" effects); {{level_pct}} = the same strength as a whole-number percentage (0-100) instead; {{scale_instruction}} = (Structured steps mode only) the text of whichever step\'s threshold applies at the current level, chosen in code rather than by the model reading a number; {{responding_to}} = a short "speaker: excerpt" line for the immediately preceding chat message (trimmed, not the full message or character card) — empty if there is none; {{scene}} = a "Scene lookback" transcript of the last N chat messages (speaker + full text, see the Scene lookback field below), the same mechanism the LLM detector\'s classification uses — empty when lookback is 0. Some models respond more reliably to one level form than the other — the literal numeral "1" is heavily associated with "lowest"/"level one" in a lot of training data, which can make a model treat {{level}}=1.00 as weak rather than maximum; if you see that, try {{level_pct}} instead (100 doesn\'t carry the same "lowest" association), or switch to Structured steps so band selection never depends on the model reading a number at all. SillyTavern\'s own macros like {{user}}/{{char}} also work here.')}</small>
                     <div class="st_mangler_template_helper">
                         <select class="st_mangler_template_example_select">
                             ${PROMPT_TEMPLATE_EXAMPLES.map(e => `<option value="${e.id}">${e.label}</option>`).join('')}
@@ -915,6 +920,10 @@ function renderTypeFields(effect) {
                         </div>
                     </div>
                     ${field('textarea', 'llmRewrite.promptTemplate', effect.llmRewrite.promptTemplate, 'rows="5" placeholder="e.g. Rewrite {{original}} at strength {{level}}: {{scale_instruction}}"')}
+                    <label>
+                        Scene lookback (messages)${infoIcon('How many of the most recent chat messages to expose as {{scene}} in the template — speaker names + full text, same mechanism as the LLM detector\'s classification transcript. 0 disables it.')}
+                        ${field('number', 'llmRewrite.sceneLookback', effect.llmRewrite.sceneLookback, 'min="0" max="30" style="max-width: 5em;"')}
+                    </label>
                     <label>
                         Scaling${infoIcon('Freeform: write level-dependent behavior as prose inside the template above, using {{level}}/{{level_pct}} directly. Structured steps: define threshold+text steps below; code picks the matching step\'s text for the current level and exposes it as {{scale_instruction}} in the template, so band selection never depends on the model reading a number.')}
                         <select class="st_mangler_field" data-field="llmRewrite.scaleMode">

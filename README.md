@@ -112,9 +112,11 @@ for `always`-mode effects), `{{level_pct}}` (the same strength as a whole-number
 percentage instead) — pick whichever `level` form reads more naturally in your template — and
 `{{responding_to}}` (a short "speaker: excerpt" line for the immediately preceding chat message,
 trimmed rather than the full message or character card — empty if there is none, e.g. the very
-first message in a chat). SillyTavern's own macros (`{{user}}`, `{{char}}`, etc.) also work in
-the template — they're substituted by SillyTavern itself after this extension's own placeholders
-are resolved.
+first message in a chat), and `{{scene}}` (a **Scene lookback** transcript of the last N chat
+messages — speaker names + full text, same mechanism the LLM detector's classification transcript
+already uses; the lookback count is set per-effect, `0` disables it). SillyTavern's own macros
+(`{{user}}`, `{{char}}`, etc.) also work in the template — they're substituted by SillyTavern
+itself after this extension's own placeholders are resolved.
 
 **Starting from a template:** the example picker above the template field ("Basic rewrite",
 "Freeform, level-banded prose", "Structured steps") inserts a starting point via **Insert
