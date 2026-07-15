@@ -57,10 +57,10 @@ Open the **Message Mangler** drawer in the Extensions settings panel.
   only affects detection. Requires the Connection Manager extension to be enabled with at least
   one profile configured; if none are available, this shows a note instead of a dropdown.
 - **Effects** — an ordered list, each independently configurable. Each effect collapses to one
-  line (label, type, reorder/duplicate/delete) — click the chevron to expand it. The label is
-  editable directly in that collapsed header, whether the row is expanded or not — there's no
-  separate label field, so there's nothing to fall out of sync. New effects open
-  expanded by default. Click **Add effect** to add
+  line (enabled checkbox, label, type, reorder/duplicate/delete) — click the chevron to expand
+  it. The enabled checkbox and label are both right there in that collapsed header, editable
+  whether the row is expanded or not, so toggling an effect off or renaming it never requires
+  opening it. New effects open expanded by default. Click **Add effect** to add
   one, pick a **type**, set its **Target** (User messages / AI messages / Both — which speaker's
   message the transform actually rewrites; independent of the trigger's detection source below),
   and configure its **trigger**. Use the ▲/▼ buttons to reorder, or the copy icon to **duplicate**

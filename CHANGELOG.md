@@ -4,6 +4,11 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v23
+
+- **Moved the enabled checkbox into the collapsed effect row** — toggling an effect on/off no
+  longer requires expanding it, matching the label (already editable in the collapsed header).
+
 ## v22
 
 - **`{{scene}}` lookback placeholder for `llm-rewrite`** — a per-effect **Scene lookback**
