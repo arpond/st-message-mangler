@@ -10,7 +10,7 @@ import { extension_prompt_types, extension_prompt_roles } from '../../../../scri
 import {
     clamp01, escapeRegExp, matchesKeywordList, applyRegexEffect, applyDrunk,
     looksDegenerate, escapeHtmlForDisplay, wordDiffHighlight, backfillDefaults, resolveAwarenessCue,
-    resolveScaleStep,
+    resolveScaleStep, splitContinuationSuffix,
 } from './lib/pure.js';
 
 const context = SillyTavern.getContext();
@@ -638,6 +638,18 @@ async function onMessageSent(chatId) {
 // this message is already rendered to the DOM by the time this hook fires (CHARACTER_MESSAGE_RENDERED
 // fires after render, whereas MESSAGE_SENT fires before) — so a text change here needs an
 // explicit context.updateMessageBlock() to actually show up, plus a saveChat() to persist it.
+//
+// Continue-awareness: there's no CONTINUE-specific event — ST appends newly generated text onto
+// the message's existing (already-mangled) `mes` and re-fires this same event. Detected via
+// splitContinuationSuffix comparing the current text against `mangler_mangled_snapshot`, the
+// exact mangled text this function last wrote — if the current text still starts with that and
+// has grown, only the new suffix is unprocessed raw content; the mangled prefix is left untouched
+// rather than reprocessed (which would compound transforms onto already-mangled text and corrupt
+// the true-original bookkeeping below). Both snapshot fields are internal bookkeeping, always
+// maintained regardless of showOriginal — unlike the user-facing `mangler_original`.
+// Known limitation: a manual in-place edit that happens to preserve the existing mangled prefix
+// looks identical to a Continue here (no CONTINUE-specific event to disambiguate) — worst case it
+// only reprocesses the edited suffix instead of the whole message.
 async function onCharacterMessageRendered(chatId) {
     const settings = getSettings();
     debugLog(`onCharacterMessageRendered: chatId=${chatId}, extension enabled=${settings.enabled}`);
@@ -649,20 +661,38 @@ async function onCharacterMessageRendered(chatId) {
         return;
     }
 
-    const original = message.mes;
-    const mangled = await applyEffects(original, message, settings, 'character');
-    if (mangled === original) {
+    const currentMes = message.mes;
+    message.extra = message.extra || {};
+    const { isContinuation, newRawPortion, mangledPrefix } =
+        splitContinuationSuffix(currentMes, message.extra.mangler_mangled_snapshot);
+    const trueOriginalPrefix = isContinuation ? (message.extra.mangler_true_snapshot ?? mangledPrefix) : '';
+
+    const mangledSuffix = await applyEffects(newRawPortion, message, settings, 'character');
+    const mangled = mangledPrefix + mangledSuffix;
+    const trueOriginal = trueOriginalPrefix + newRawPortion;
+
+    // A chat with no active mangling effects (the common case) sees zero extra writes/saves,
+    // same as before this fix — only a genuine continuation needs its snapshot refreshed even
+    // when this particular pass produced no visible change.
+    if (mangled === currentMes && !isContinuation) {
         debugLog(`onCharacterMessageRendered: chatId=${chatId} — message unchanged, not rewritten.`);
         return;
     }
 
-    message.mes = mangled;
-    message.extra = message.extra || {};
+    message.extra.mangler_mangled_snapshot = mangled;
+    message.extra.mangler_true_snapshot = trueOriginal;
+    if (mangled === currentMes) {
+        debugLog(`onCharacterMessageRendered: chatId=${chatId} — continuation snapshot updated, no visible change this pass.`);
+        context.saveChat();
+        return;
+    }
 
-    const displayText = buildDisplayText(mangled, original, settings);
+    message.mes = mangled;
+
+    const displayText = buildDisplayText(mangled, trueOriginal, settings);
     if (displayText !== null) {
         message.extra.display_text = displayText;
-        if (settings.showOriginal) message.extra.mangler_original = original; else delete message.extra.mangler_original;
+        if (settings.showOriginal) message.extra.mangler_original = trueOriginal; else delete message.extra.mangler_original;
     } else {
         delete message.extra.display_text;
         delete message.extra.mangler_original;
@@ -670,7 +700,7 @@ async function onCharacterMessageRendered(chatId) {
 
     context.updateMessageBlock(chatId, message);
     context.saveChat();
-    log(`Mangled character message ${chatId}: "${original}" -> "${mangled}"`);
+    log(`Mangled character message ${chatId}: "${trueOriginal}" -> "${mangled}"`);
 }
 
 // Shared <input>/<textarea> template for anything bound to a `settings.effects[i].<dataField>`

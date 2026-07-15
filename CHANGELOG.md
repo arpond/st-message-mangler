@@ -4,6 +4,13 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v13
+
+- **Fixed `Continue` compounding mangled text** — using SillyTavern's Continue on an already-
+  mangled AI message no longer reprocesses the whole message (compounding regex/drunk/llm-rewrite
+  transforms) or corrupts "Show original." The extension now detects when new text has been
+  appended onto previously-mangled content and only processes the new portion.
+
 ## v12
 
 - **Structured scaling steps for `llm-rewrite`** — new "Scaling" mode on LLM-rewrite effects.

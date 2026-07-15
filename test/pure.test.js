@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
     clamp01, escapeRegExp, matchesKeywordList, applyRegexEffect, applyDrunk,
     looksDegenerate, escapeHtmlForDisplay, wordDiffHighlight, backfillDefaults, resolveAwarenessCue,
-    resolveScaleStep,
+    resolveScaleStep, splitContinuationSuffix,
 } from '../lib/pure.js';
 
 test('clamp01 clamps to [0, 1]', () => {
@@ -163,4 +163,32 @@ test('resolveScaleStep treats level exactly on a threshold as a match for that s
 test('resolveScaleStep works with unsorted step input', () => {
     const steps = [{ threshold: 0.7, text: 'high' }, { threshold: 0, text: 'none' }, { threshold: 0.3, text: 'low' }];
     assert.equal(resolveScaleStep(steps, 0.5), 'low');
+});
+
+test('splitContinuationSuffix treats a fresh message (no prior snapshot) as not a continuation', () => {
+    const result = splitContinuationSuffix('Hello there.', undefined);
+    assert.equal(result.isContinuation, false);
+    assert.equal(result.newRawPortion, 'Hello there.');
+    assert.equal(result.mangledPrefix, '');
+});
+
+test('splitContinuationSuffix detects a genuine continuation and splits out only the new suffix', () => {
+    const result = splitContinuationSuffix('Hello there. Nice to meet you.', 'Hello there.');
+    assert.equal(result.isContinuation, true);
+    assert.equal(result.newRawPortion, ' Nice to meet you.');
+    assert.equal(result.mangledPrefix, 'Hello there.');
+});
+
+test('splitContinuationSuffix treats unrelated content (a swipe/regenerate) as not a continuation', () => {
+    const result = splitContinuationSuffix('A completely different reply.', 'Hello there.');
+    assert.equal(result.isContinuation, false);
+    assert.equal(result.newRawPortion, 'A completely different reply.');
+    assert.equal(result.mangledPrefix, '');
+});
+
+test('splitContinuationSuffix treats identical-length text (swipe back) as not a continuation', () => {
+    const result = splitContinuationSuffix('Hello there.', 'Hello there.');
+    assert.equal(result.isContinuation, false);
+    assert.equal(result.newRawPortion, 'Hello there.');
+    assert.equal(result.mangledPrefix, '');
 });
