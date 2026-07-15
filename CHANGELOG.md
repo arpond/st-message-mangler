@@ -4,6 +4,13 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v16
+
+- **Prompt-template starter examples** — the LLM-rewrite template field now has an example
+  picker ("Basic rewrite", "Freeform, level-banded prose", "Structured steps") and an **Insert
+  example** button, only ever writing into an empty template so existing work is never
+  overwritten.
+
 ## v15
 
 - **Reduced false positives in degenerate-output detection** — the phrase-repeat check now only

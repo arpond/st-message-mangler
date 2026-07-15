@@ -860,6 +860,14 @@ function renderTypeFields(effect) {
                 <div class="st_mangler_type_fields">
                     <small>Calls your connected AI model to rewrite the text and waits for the reply — sending
                     a message will pause for however long a normal generation takes.${infoIcon('Instructions for how to rewrite the message. Placeholders available: {{original}} = the message text so far (this is what gets rewritten, i.e. current pipeline state after any earlier effects); {{true_original}} = the true pre-pipeline text, before any effect ran; {{level}} = current trigger strength as a number from 0 to 1 (1 for "Always" effects); {{level_pct}} = the same strength as a whole-number percentage (0-100) instead; {{scale_instruction}} = (Structured steps mode only) the text of whichever step\'s threshold applies at the current level, chosen in code rather than by the model reading a number. Some models respond more reliably to one level form than the other — the literal numeral "1" is heavily associated with "lowest"/"level one" in a lot of training data, which can make a model treat {{level}}=1.00 as weak rather than maximum; if you see that, try {{level_pct}} instead (100 doesn\'t carry the same "lowest" association), or switch to Structured steps so band selection never depends on the model reading a number at all. SillyTavern\'s own macros like {{user}}/{{char}} also work here.')}</small>
+                    <div class="st_mangler_template_helper">
+                        <select class="st_mangler_template_example_select">
+                            ${PROMPT_TEMPLATE_EXAMPLES.map(e => `<option value="${e.id}">${e.label}</option>`).join('')}
+                        </select>
+                        <div class="menu_button menu_button_icon st_mangler_insert_template" title="Insert as a starting point (only when the template field is empty)">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i> Insert example
+                        </div>
+                    </div>
                     ${field('textarea', 'llmRewrite.promptTemplate', effect.llmRewrite.promptTemplate, 'rows="5" placeholder="e.g. Rewrite {{original}} at strength {{level}}: {{scale_instruction}}"')}
                     <label>
                         Scaling${infoIcon('Freeform: write level-dependent behavior as prose inside the template above, using {{level}}/{{level_pct}} directly. Structured steps: define threshold+text steps below; code picks the matching step\'s text for the current level and exposes it as {{scale_instruction}} in the template, so band selection never depends on the model reading a number.')}
@@ -916,6 +924,20 @@ const expandedEffectIds = new Set();
 const effectActiveTab = new Map();
 
 const EFFECT_TYPE_LABELS = { regex: 'Regex replace', drunk: 'Drunk mangle', 'llm-rewrite': 'LLM rewrite' };
+
+// Starter points for the llm-rewrite promptTemplate field — inserted via the "Insert example"
+// button, never overwriting existing content (see the .st_mangler_insert_template handler).
+const PROMPT_TEMPLATE_EXAMPLES = [
+    { id: 'basic', label: 'Basic rewrite', template:
+        'Rewrite the message below so that [describe the transformation], keeping the '
+        + "speaker's original intent and voice otherwise.\n\nOriginal message:\n{{original}}\n\n"
+        + 'Rewritten message (text only, no commentary):' },
+    { id: 'banded', label: 'Freeform, level-banded prose', template:
+        'Rewrite {{original}} at strength {{level}} (0 = no change, 1 = extreme): '
+        + '[describe what changes at low vs. high strength].' },
+    { id: 'steps', label: 'Structured steps', template:
+        'Rewrite {{original}}: {{scale_instruction}}' },
+];
 
 const EFFECT_TABS = [
     { id: 'basics', label: 'Basics' },
@@ -1322,6 +1344,21 @@ function addSettingsUI() {
         refreshEffectList(settings);
         context.saveSettingsDebounced();
     });
+    $('#st_mangler_effects').on('click', '.st_mangler_insert_template', function () {
+        const row = $(this).closest('.st_mangler_effect');
+        const effect = settings.effects.find(e => e.id === row.data('effect-id'));
+        if (!effect) return;
+        if (effect.llmRewrite.promptTemplate.trim()) {
+            toastr.warning('Message Mangler: template already has content — clear it first to insert a starter template.');
+            return;
+        }
+        const example = PROMPT_TEMPLATE_EXAMPLES.find(e => e.id === row.find('.st_mangler_template_example_select').val());
+        if (!example) return;
+        effect.llmRewrite.promptTemplate = example.template;
+        refreshEffectList(settings);
+        context.saveSettingsDebounced();
+    });
+
     $('#st_mangler_effects').on('click', '.st_mangler_scale_gen_run', function () {
         const row = $(this).closest('.st_mangler_effect');
         const id = row.data('effect-id');

@@ -108,6 +108,11 @@ percentage instead) — pick whichever `level` form reads more naturally in your
 SillyTavern's own macros (`{{user}}`, `{{char}}`, etc.) also work in the template — they're
 substituted by SillyTavern itself after this extension's own placeholders are resolved.
 
+**Starting from a template:** the example picker above the template field ("Basic rewrite",
+"Freeform, level-banded prose", "Structured steps") inserts a starting point via **Insert
+example** — only when the field is currently empty, so it never overwrites a template you've
+already written.
+
 **Known model quirk:** on one local model, the literal maximum value (`{{level}}=1.00` /
 `{{level_pct}}=100`) reliably produced a *weaker* result than a near-maximum one (`0.91`
 consistently strong, `1.00` consistently weak) — reproduced across repeated identical runs, and
