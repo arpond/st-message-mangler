@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
     clamp01, escapeRegExp, matchesKeywordList, applyRegexEffect, applyDrunk,
     looksDegenerate, escapeHtmlForDisplay, wordDiffHighlight, backfillDefaults, resolveAwarenessCue,
-    resolveScaleStep, splitContinuationSuffix, generateScaleSteps,
+    resolveScaleStep, splitContinuationSuffix, generateScaleSteps, sanitizeScaleSteps,
 } from '../lib/pure.js';
 
 test('clamp01 clamps to [0, 1]', () => {
@@ -253,4 +253,41 @@ test('generateScaleSteps blanks text when the step count changes', () => {
     const previous = [{ threshold: 0, text: 'calm' }, { threshold: 1, text: 'furious' }];
     const steps = generateScaleSteps(3, 'linear', previous);
     assert.deepEqual(steps.map(s => s.text), ['', '', '']);
+});
+
+test('sanitizeScaleSteps resets a non-finite threshold to 0 and warns', () => {
+    const steps = [{ threshold: 'abc', text: 'x' }];
+    const warnings = [];
+    sanitizeScaleSteps(steps, (...args) => warnings.push(args));
+    assert.equal(steps[0].threshold, 0);
+    assert.equal(warnings.length, 1);
+});
+
+test('sanitizeScaleSteps clamps out-of-range thresholds into [0, 1]', () => {
+    const steps = [{ threshold: -0.5, text: 'a' }, { threshold: 1.5, text: 'b' }];
+    sanitizeScaleSteps(steps, () => {});
+    assert.equal(steps[0].threshold, 0);
+    assert.equal(steps[1].threshold, 1);
+});
+
+test('sanitizeScaleSteps coerces a non-string text to an empty string', () => {
+    const steps = [{ threshold: 0.5, text: null }];
+    sanitizeScaleSteps(steps, () => {});
+    assert.equal(steps[0].text, '');
+});
+
+test('sanitizeScaleSteps warns on duplicate thresholds without changing values', () => {
+    const steps = [{ threshold: 0.5, text: 'a' }, { threshold: 0.5, text: 'b' }];
+    const warnings = [];
+    sanitizeScaleSteps(steps, (...args) => warnings.push(args));
+    assert.equal(steps[0].threshold, 0.5);
+    assert.equal(steps[1].threshold, 0.5);
+    assert.equal(warnings.length, 1);
+});
+
+test('sanitizeScaleSteps does not warn when thresholds are legitimately distinct', () => {
+    const steps = [{ threshold: 0.3, text: 'a' }, { threshold: 0.7, text: 'b' }];
+    const warnings = [];
+    sanitizeScaleSteps(steps, (...args) => warnings.push(args));
+    assert.equal(warnings.length, 0);
 });

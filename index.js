@@ -10,7 +10,7 @@ import { extension_prompt_types, extension_prompt_roles } from '../../../../scri
 import {
     clamp01, escapeRegExp, matchesKeywordList, applyRegexEffect, applyDrunk,
     looksDegenerate, escapeHtmlForDisplay, wordDiffHighlight, backfillDefaults, resolveAwarenessCue,
-    resolveScaleStep, splitContinuationSuffix, generateScaleSteps,
+    resolveScaleStep, splitContinuationSuffix, generateScaleSteps, sanitizeScaleSteps,
 } from './lib/pure.js';
 
 const context = SillyTavern.getContext();
@@ -126,6 +126,7 @@ function getSettings() {
     backfillDefaults(settings, DEFAULT_SETTINGS, warn);
     for (const effect of settings.effects) {
         backfillDefaults(effect, defaultEffectShape(effect.type), warn);
+        sanitizeScaleSteps(effect.llmRewrite.scaleSteps, warn);
     }
     return settings;
 }
@@ -1089,6 +1090,7 @@ async function importEffectsFromFile(file, settings) {
         for (const imported of data.effects) {
             const effect = { ...imported, id: `effect_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` };
             backfillDefaults(effect, defaultEffectShape(effect.type), warn);
+            sanitizeScaleSteps(effect.llmRewrite.scaleSteps, warn);
             settings.effects.push(effect);
         }
         refreshEffectList(settings);

@@ -10,6 +10,10 @@ successive rounds of development.
   (routes around a model quirk where the literal maximum reads as "weak") is now a per-effect
   "Level cap sent to model" setting instead of hardcoded, governing both the llm-rewrite template
   and the awareness cue. Set to `1` to disable on models that don't have this quirk.
+- **Scale-step threshold validation** — a non-finite scale-step threshold (from a malformed
+  import) now resets to 0 with a warning instead of silently making that step never fire; an
+  out-of-range threshold clamps into `[0, 1]`; duplicate thresholds now warn (the first one still
+  wins, unchanged) instead of failing silently.
 
 ## v17
 
