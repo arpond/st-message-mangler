@@ -718,6 +718,7 @@ function renderTriggerPanel(effect) {
     const showIncrementDecay = isKeyword || llmMode === 'cumulative' || llmMode === 'cumulative-lock';
     return `
         <div class="st_mangler_trigger" style="display: ${effect.trigger.mode === 'progressive' ? 'block' : 'none'};">
+            <div class="st_mangler_trigger_section_header">Detection</div>
             <label class="st_mangler_trigger_row">
                 Detector:
                 <select class="st_mangler_field" data-field="trigger.detector">
@@ -758,6 +759,11 @@ function renderTriggerPanel(effect) {
                 Lock threshold (0-1) — once level reaches this, it stops decaying permanently until dispelled:
                 ${field('number', 'trigger.lockThreshold', effect.trigger.lockThreshold, 'min="0" max="1" step="0.05" style="max-width: 6em;"')}
             </label>
+            <label class="st_mangler_trigger_row" style="display: ${isKeyword ? 'none' : 'block'};">
+                LLM lookback (messages of recent chat given to the classifier):
+                ${field('number', 'trigger.llmLookback', effect.trigger.llmLookback, 'min="1" max="30" style="max-width: 5em;"')}
+            </label>
+            <div class="st_mangler_trigger_section_header">Escalation</div>
             <label class="st_mangler_trigger_row" style="display: ${showIncrementDecay ? 'block' : 'none'};">
                 Increment per hit:
                 ${field('number', 'trigger.incrementPerHit', effect.trigger.incrementPerHit, 'step="0.01" min="0" max="1" style="max-width: 6em;"')}
@@ -766,14 +772,11 @@ function renderTriggerPanel(effect) {
                 Decay per turn:
                 ${field('number', 'trigger.decayPerTurn', effect.trigger.decayPerTurn, 'step="0.005" min="0" max="1" style="max-width: 6em;"')}
             </label>
-            <label class="st_mangler_trigger_row" style="display: ${isKeyword ? 'none' : 'block'};">
-                LLM lookback (messages of recent chat given to the classifier):
-                ${field('number', 'trigger.llmLookback', effect.trigger.llmLookback, 'min="1" max="30" style="max-width: 5em;"')}
-            </label>
             <label class="st_mangler_trigger_row">
                 Min level to apply (below this, the effect stays dormant):
                 ${field('number', 'trigger.minLevelToApply', effect.trigger.minLevelToApply, 'step="0.01" min="0" max="1" style="max-width: 6em;"')}
             </label>
+            <div class="st_mangler_trigger_section_header">Safety</div>
             <label class="st_mangler_trigger_row">
                 Dispel keywords (comma-separated — any match forces the level to 0 immediately):
                 ${field('text', 'trigger.dispelKeywords', effect.trigger.dispelKeywords)}

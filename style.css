@@ -55,6 +55,23 @@
     margin-top: 0.15em;
 }
 
+.st-message-mangler-settings .st_mangler_trigger_section_header {
+    margin-top: 0.6em;
+    padding-top: 0.4em;
+    border-top: 1px dashed var(--SmartThemeBorderColor, #666);
+    font-size: 0.8em;
+    font-weight: bold;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    opacity: 0.65;
+}
+
+.st-message-mangler-settings .st_mangler_trigger_section_header:first-child {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: none;
+}
+
 .st-message-mangler-settings #st_mangler_effects {
     max-height: 50vh;
     overflow-y: auto;

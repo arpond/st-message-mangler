@@ -236,6 +236,28 @@ success — only a genuinely persistent failure reaches the fail-open path.
 | Bar scene drunk | Drunk mangle | Progressive, keyword (`drink, beer, shot, bar, tipsy`) | intensity 0.5 |
 | Tree spell | LLM rewrite | Progressive, keyword (`spell, cast, curse`) | prompt template above |
 
+### FAQ
+
+A few concept pairs that sound similar but mean different things, collected in one place:
+
+- **Target vs. "Detect from" (`detectSource`)** — **Target** is *which speaker's message gets
+  rewritten*. **Detect from** is *whose messages are allowed to move the level*. They're
+  independent: an effect can detect from one speaker (say, the AI's dialogue) and only ever
+  transform the other speaker's text.
+- **`{{level}}` vs. `{{level_pct}}`** — the same value in two units: 0-1 vs. 0-100. Use whichever
+  reads more naturally in your prompt. If your model seems to treat one form oddly (e.g. the
+  literal maximum reading as "weak" — see the known-quirk note above), try the other.
+- **The three LLM integration modes, one line each** — **Absolute**: level = the latest rating,
+  no memory. **Cumulative**: the rating becomes a hit/no-hit test, then increments/decays like
+  keyword mode. **Cumulative, locks once triggered**: same as cumulative, but once it crosses a
+  threshold it locks permanently until dispelled.
+- **"Show original" vs. "Highlight changed words"** — both are display-only and combinable.
+  "Show original" appends the full original text below the mangled message. "Highlight changed
+  words" colors just the words that differ, inline.
+- **"Dispel keywords" vs. "Max turns active"** — dispel is an explicit, immediate "the spell is
+  broken" trigger you write yourself. Max turns active is passive auto-expiry after N consecutive
+  active turns, with no trigger phrase needed.
+
 ## How it works
 
 Hooks the `MESSAGE_SENT` event, which SillyTavern fires right after your message is added to
