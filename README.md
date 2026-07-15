@@ -145,6 +145,8 @@ no meaningful way to map old bands onto a different number of new ones.
 
 Example:
 
+
+
 ```
 Rewrite the message below so the speaker can't help professing their love of trees, however
 unrelated the topic, at escalation strength {{level}} (0 = no change, 1 = extreme). Preserve
