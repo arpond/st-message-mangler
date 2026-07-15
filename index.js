@@ -44,6 +44,7 @@ function defaultEffectShape(type = 'regex') {
         type,
         target: 'user', // 'user' | 'character' | 'both' — which speaker's message the transform is applied to
         awarenessCue: '', // optional; injected into the prompt via setExtensionPrompt only while this effect is active
+        promptLevelCap: 0.99, // caps {{level}}/{{level_pct}} substitution in both the llm-rewrite template and awarenessCue — routes around a local-model quirk where the literal maximum reads as "weak"; set to 1 to disable if the connected model doesn't have this quirk
         trigger: defaultTrigger(),
         regex: { pattern: '', flags: 'gi', replacement: '' },
         drunk: { intensity: 0.3 },
@@ -411,8 +412,9 @@ async function runLlmRewrite(text, effect, level, trueOriginal) {
     // consistently weak, across multiple prompt rewordings that ruled out phrasing as the
     // cause). Capping what's substituted into the prompt just short of the true ceiling routes
     // around that without guessing at wording again — doesn't affect the real `level` used for
-    // trigger/threshold logic elsewhere, only what this specific model call sees.
-    const promptLevel = Math.min(level, 0.99);
+    // trigger/threshold logic elsewhere, only what this specific model call sees. Per-effect
+    // configurable (effect.promptLevelCap) since not every model has this quirk.
+    const promptLevel = Math.min(level, effect.promptLevelCap);
     // No earlier effect has changed the text yet (the common case: first effect in the chain, or
     // no llm-rewrite effect ran before this one) — avoid sending the same content twice under two
     // tags, which would waste tokens without telling the model anything new.
@@ -506,7 +508,7 @@ function updateAwarenessCue(effect, level, active) {
         context.setExtensionPrompt(key, '', extension_prompt_types.IN_CHAT, 0);
         return;
     }
-    const cue = resolveAwarenessCue(effect.awarenessCue, level);
+    const cue = resolveAwarenessCue(effect.awarenessCue, level, effect.promptLevelCap);
     context.setExtensionPrompt(key, cue, extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
 }
 
@@ -909,7 +911,7 @@ function renderTestPanel(effect) {
     // Preview-only: shows what updateAwarenessCue would actually inject at this level, without
     // touching the live extension prompt (setExtensionPrompt isn't called here).
     const cuePreview = effect.awarenessCue ? `
-            <small>Awareness cue at this level: <span class="st_mangler_test_cue_val">${escapeHtmlForDisplay(resolveAwarenessCue(effect.awarenessCue, 1))}</span></small>` : '';
+            <small>Awareness cue at this level: <span class="st_mangler_test_cue_val">${escapeHtmlForDisplay(resolveAwarenessCue(effect.awarenessCue, 1, effect.promptLevelCap))}</span></small>` : '';
     // Same reuse pattern as cuePreview above — keyed off the shared test-level slider so it can
     // never drift from what runLlmRewrite would actually resolve for {{scale_instruction}}.
     const scalePreview = effect.type === 'llm-rewrite' && effect.llmRewrite.scaleMode === 'steps' ? `
@@ -1010,6 +1012,10 @@ function renderEffectRow(effect) {
                     <label>
                         Live awareness cue (optional)${infoIcon('Injected into the prompt only while this effect is active, so the character reacts to this specific moment (independent of any static World Info entry). Supports {{level}} / {{level_pct}}.')}
                         ${field('textarea', 'awarenessCue', effect.awarenessCue, 'rows="2" placeholder="e.g. [System: the compulsion is currently at {{level_pct}}% — let it visibly affect your dialogue.]"')}
+                    </label>
+                    <label>
+                        Level cap sent to model${infoIcon('Some models read the literal maximum {{level}}=1.00/{{level_pct}}=100 as "weak" rather than maximum. This caps what gets substituted into those placeholders (in the llm-rewrite template and the awareness cue) just short of the ceiling — the real level used for trigger/threshold logic elsewhere is untouched. Set to 1 to disable if your model doesn\'t have this quirk.')}
+                        ${field('number', 'promptLevelCap', effect.promptLevelCap, 'min="0" max="1" step="0.01" style="max-width: 5em;"')}
                     </label>`)}
                 ${pane('trigger', `
                     <label>
@@ -1430,7 +1436,7 @@ function addSettingsUI() {
         panel.find('.st_mangler_test_level_val').text(level.toFixed(2));
         const row = $(this).closest('.st_mangler_effect');
         const effect = settings.effects.find(e => e.id === row.data('effect-id'));
-        if (effect) panel.find('.st_mangler_test_cue_val').text(resolveAwarenessCue(effect.awarenessCue, level));
+        if (effect) panel.find('.st_mangler_test_cue_val').text(resolveAwarenessCue(effect.awarenessCue, level, effect.promptLevelCap));
         if (effect && effect.type === 'llm-rewrite' && effect.llmRewrite.scaleMode === 'steps') {
             panel.find('.st_mangler_test_scale_val').text(resolveScaleStep(effect.llmRewrite.scaleSteps, level));
         }

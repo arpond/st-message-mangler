@@ -118,11 +118,13 @@ already written.
 consistently strong, `1.00` consistently weak) — reproduced across repeated identical runs, and
 unaffected by rewording the prompt (spelling out "1.0 = maximum" explicitly, removing "(max of
 N)" framing, switching numeral systems) or by which placeholder was used. Since neither
-wording change nor the choice of placeholder fixed it, the extension now caps what's actually
-substituted into `{{level}}`/`{{level_pct}}` at `0.99`/`99` — the real level used for
-trigger/threshold logic is untouched, only what this one prompt sees is nudged just short of the
-literal ceiling. If your model doesn't have this quirk, this cap is invisible (0.99 vs 1.00
-reads identically in practice). Example:
+wording change nor the choice of placeholder fixed it, each effect has a **Level cap sent to
+model** setting (default `0.99`) that caps what's actually substituted into
+`{{level}}`/`{{level_pct}}` — in both the template above and the awareness cue below — the real
+level used for trigger/threshold logic is untouched, only what these prompts see is nudged just
+short of the literal ceiling. If your model doesn't have this quirk, set it to `1` to disable
+(0.99 vs 1.00 reads identically in practice on models that don't have this quirk, so the default
+is harmless either way). Example:
 
 **Scaling mode: Freeform vs. Structured steps.** By default (**Freeform**), any level-dependent
 behavior — "below 0.3 do X, 0.3-0.7 do Y, above 0.9 do Z" — has to be written as prose in the

@@ -121,6 +121,11 @@ test('resolveAwarenessCue substitutes {{level}} and {{level_pct}}, capped at 0.9
     assert.equal(resolveAwarenessCue('cue at {{level}} / {{level_pct}}%', 0.5), 'cue at 0.50 / 50%');
 });
 
+test('resolveAwarenessCue respects a custom cap', () => {
+    assert.equal(resolveAwarenessCue('cue at {{level}} / {{level_pct}}%', 1, 1), 'cue at 1.00 / 100%');
+    assert.equal(resolveAwarenessCue('cue at {{level}} / {{level_pct}}%', 1, 0.8), 'cue at 0.80 / 80%');
+});
+
 test('wordDiffHighlight marks only the words that actually changed', () => {
     const result = wordDiffHighlight('the knight drew his sword', 'the knight drew his spoon');
     assert.equal(result, 'the knight drew his <span class="st_mangler_changed">spoon</span>');

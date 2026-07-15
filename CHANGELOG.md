@@ -4,6 +4,13 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v18
+
+- **Configurable prompt-level cap** — the `0.99` cap on `{{level}}`/`{{level_pct}}` substitution
+  (routes around a model quirk where the literal maximum reads as "weak") is now a per-effect
+  "Level cap sent to model" setting instead of hardcoded, governing both the llm-rewrite template
+  and the awareness cue. Set to `1` to disable on models that don't have this quirk.
+
 ## v17
 
 - **Fixed keyword-trigger double-counting across `Continue`** — keyword and dispel-keyword
