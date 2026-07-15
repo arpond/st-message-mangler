@@ -71,11 +71,18 @@ function debugLog(...args) {
     if (getSettings().debug) log('[debug]', ...args);
 }
 
+// Also resets a numeric field to its default if the existing value isn't a valid finite number —
+// guards against corruption from hand-edited or malformed imported JSON. Without this, a bad
+// value silently becomes NaN, and e.g. `NaN < minLevelToApply` is always false, so a corrupted
+// effect could end up permanently "always active" with no error ever surfaced.
 function backfillDefaults(target, defaults) {
     for (const key of Object.keys(defaults)) {
         const defaultValue = defaults[key];
         if (target[key] === undefined) {
             target[key] = structuredClone(defaultValue);
+        } else if (typeof defaultValue === 'number' && !Number.isFinite(Number(target[key]))) {
+            warn(`Invalid value for "${key}" (${JSON.stringify(target[key])}) — resetting to default ${defaultValue}.`);
+            target[key] = defaultValue;
         } else if (defaultValue !== null && typeof defaultValue === 'object' && !Array.isArray(defaultValue)
             && target[key] !== null && typeof target[key] === 'object') {
             backfillDefaults(target[key], defaultValue);
