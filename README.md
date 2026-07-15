@@ -131,6 +131,12 @@ it onto a range — it's just handed the one instruction that already applies. `
 `{{level_pct}}` remain available in Structured steps mode too, for any part of the template that
 still wants the raw number.
 
+Building a ladder of several steps by hand gets tedious — the **Generate** control above the step
+list fills in N steps at computed thresholds in one click (Linear: evenly spaced; Exponential:
+clustered toward the low end, more resolution for subtle early changes), leaving each step's text
+blank for you to fill in. It replaces whatever steps are already there, so use it as a starting
+point before writing the instruction text, not to tweak an existing ladder.
+
 Example:
 
 ```

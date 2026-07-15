@@ -87,6 +87,16 @@
     min-height: unset;
 }
 
+.st-message-mangler-settings .st_mangler_scale_gen {
+    display: flex;
+    align-items: center;
+    gap: 0.4em;
+    margin-bottom: 0.4em;
+    padding-bottom: 0.4em;
+    border-bottom: 1px solid var(--SmartThemeBorderColor, #444);
+    font-size: 0.85em;
+}
+
 .st-message-mangler-settings .st_mangler_trigger_row {
     display: block;
     margin: 0.35em 0;

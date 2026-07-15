@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
     clamp01, escapeRegExp, matchesKeywordList, applyRegexEffect, applyDrunk,
     looksDegenerate, escapeHtmlForDisplay, wordDiffHighlight, backfillDefaults, resolveAwarenessCue,
-    resolveScaleStep, splitContinuationSuffix,
+    resolveScaleStep, splitContinuationSuffix, generateScaleSteps,
 } from '../lib/pure.js';
 
 test('clamp01 clamps to [0, 1]', () => {
@@ -191,4 +191,26 @@ test('splitContinuationSuffix treats identical-length text (swipe back) as not a
     assert.equal(result.isContinuation, false);
     assert.equal(result.newRawPortion, 'Hello there.');
     assert.equal(result.mangledPrefix, '');
+});
+
+test('generateScaleSteps with count=1 returns a single step at threshold 0', () => {
+    const steps = generateScaleSteps(1, 'linear');
+    assert.deepEqual(steps, [{ threshold: 0, text: '' }]);
+});
+
+test('generateScaleSteps linear spaces thresholds evenly across [0, 1]', () => {
+    const steps = generateScaleSteps(4, 'linear');
+    assert.deepEqual(steps.map(s => s.threshold), [0, 0.33, 0.67, 1]);
+    assert.ok(steps.every(s => s.text === ''));
+});
+
+test('generateScaleSteps exponential clusters thresholds toward the low end', () => {
+    const steps = generateScaleSteps(4, 'exponential');
+    assert.deepEqual(steps.map(s => s.threshold), [0, 0.11, 0.44, 1]);
+});
+
+test('generateScaleSteps clamps a non-positive or NaN count to 1 step', () => {
+    assert.deepEqual(generateScaleSteps(0, 'linear'), [{ threshold: 0, text: '' }]);
+    assert.deepEqual(generateScaleSteps(-5, 'linear'), [{ threshold: 0, text: '' }]);
+    assert.deepEqual(generateScaleSteps(NaN, 'linear'), [{ threshold: 0, text: '' }]);
 });

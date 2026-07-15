@@ -4,6 +4,12 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v14
+
+- **Generate preset curves for scale steps** — the Structured steps editor now has a "Generate"
+  control that fills in N steps at once, either evenly spaced (Linear) or clustered toward the
+  low end (Exponential), leaving each step's text blank to fill in.
+
 ## v13
 
 - **Fixed `Continue` compounding mangled text** — using SillyTavern's Continue on an already-

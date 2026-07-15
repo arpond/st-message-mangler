@@ -10,7 +10,7 @@ import { extension_prompt_types, extension_prompt_roles } from '../../../../scri
 import {
     clamp01, escapeRegExp, matchesKeywordList, applyRegexEffect, applyDrunk,
     looksDegenerate, escapeHtmlForDisplay, wordDiffHighlight, backfillDefaults, resolveAwarenessCue,
-    resolveScaleStep, splitContinuationSuffix,
+    resolveScaleStep, splitContinuationSuffix, generateScaleSteps,
 } from './lib/pure.js';
 
 const context = SillyTavern.getContext();
@@ -822,6 +822,18 @@ function renderScaleSteps(effect) {
         </div>`).join('');
     return `
         <div class="st_mangler_scale_steps">
+            <div class="st_mangler_scale_gen">
+                <span class="st_mangler_scale_step_label">Generate</span>
+                <input type="number" class="text_pole st_mangler_scale_gen_count" min="1" max="20" value="4" style="max-width: 4em;" />
+                steps,
+                <select class="st_mangler_scale_gen_curve">
+                    <option value="linear">Linear</option>
+                    <option value="exponential">Exponential (denser at low levels)</option>
+                </select>
+                <div class="menu_button menu_button_icon st_mangler_scale_gen_run" title="Replace steps below with a generated ladder">
+                    <i class="fa-solid fa-wand-magic-sparkles"></i> Generate
+                </div>
+            </div>
             ${rows}
             <div class="menu_button menu_button_icon st_mangler_scale_step_add" title="Add step">
                 <i class="fa-solid fa-plus"></i> Add step
@@ -1310,6 +1322,18 @@ function addSettingsUI() {
         refreshEffectList(settings);
         context.saveSettingsDebounced();
     });
+    $('#st_mangler_effects').on('click', '.st_mangler_scale_gen_run', function () {
+        const row = $(this).closest('.st_mangler_effect');
+        const id = row.data('effect-id');
+        const effect = settings.effects.find(e => e.id === id);
+        if (!effect) return;
+        const count = Number(row.find('.st_mangler_scale_gen_count').val());
+        const curve = row.find('.st_mangler_scale_gen_curve').val();
+        effect.llmRewrite.scaleSteps = generateScaleSteps(count, curve);
+        refreshEffectList(settings);
+        context.saveSettingsDebounced();
+    });
+
     $('#st_mangler_effects').on('click', '.st_mangler_scale_step_add', function () {
         const id = $(this).closest('.st_mangler_effect').data('effect-id');
         const effect = settings.effects.find(e => e.id === id);
