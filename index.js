@@ -1109,6 +1109,17 @@ function renderDetectionProfileOptions(settings) {
         </select>`;
 }
 
+// Re-renders just the detection-profile dropdown in place. Needed because
+// renderDetectionProfileOptions reads context.extensionSettings.connectionManager?.profiles at
+// whatever moment it's called — if Connection Manager hadn't finished loading its own profile
+// list yet when addSettingsUI() first ran, a validly-saved profile would show the "no longer
+// exists" warning and stay stuck that way until a full page reload. Called on
+// CONNECTION_PROFILE_LOADED (see bottom of file) so the panel self-corrects once Connection
+// Manager actually finishes, with no reload needed.
+function refreshDetectionProfileDropdown(settings) {
+    $('#st_mangler_detection_profile_wrap').html(renderDetectionProfileOptions(settings));
+}
+
 // Case-insensitive exact match on label. If more than one effect shares a label, the first
 // match wins — labels aren't enforced unique, and disambiguating further would add complexity
 // for a rare case (single-effect export already has the same "first-match-ish" simplification
@@ -1211,7 +1222,7 @@ function addSettingsUI() {
                     </label>
                     <label>
                         Detection connection${infoIcon('Send LLM classification through a different connection profile than the main chat (e.g. a cheaper/faster model). Rewrites always use the main connection.')}
-                        ${renderDetectionProfileOptions(settings)}
+                        <span id="st_mangler_detection_profile_wrap">${renderDetectionProfileOptions(settings)}</span>
                     </label>
                     <hr>
                     <small><b>Effects</b> (applied in order). Each can run always or be triggered progressively by
@@ -1261,7 +1272,7 @@ function addSettingsUI() {
         settings.generateTimeoutMs = Number($(this).val());
         context.saveSettingsDebounced();
     });
-    $('#st_mangler_detection_profile').on('input', function () {
+    $('#st_mangler_detection_profile_wrap').on('input', '#st_mangler_detection_profile', function () {
         settings.detectionConnectionProfileId = $(this).val();
         context.saveSettingsDebounced();
     });
@@ -1456,4 +1467,5 @@ registerSlashCommands();
 context.eventSource.on(context.eventTypes.MESSAGE_SENT, onMessageSent);
 context.eventSource.on(context.eventTypes.CHARACTER_MESSAGE_RENDERED, onCharacterMessageRendered);
 context.eventSource.on(context.eventTypes.CHAT_CHANGED, () => clearAllAwarenessCues(getSettings()));
+context.eventSource.on(context.eventTypes.CONNECTION_PROFILE_LOADED, () => refreshDetectionProfileDropdown(getSettings()));
 log('Extension loaded.');

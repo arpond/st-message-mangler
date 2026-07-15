@@ -10,6 +10,10 @@ successive rounds of development.
   picker ("Basic rewrite", "Freeform, level-banded prose", "Structured steps") and an **Insert
   example** button, only ever writing into an empty template so existing work is never
   overwritten.
+- **Fixed a stale "profile no longer exists" warning** — the detection-connection dropdown now
+  re-renders when Connection Manager finishes loading its profiles, instead of only checking once
+  at initial panel render (which could race Connection Manager on a slower load and show a false
+  warning until the page was reloaded).
 
 ## v15
 
