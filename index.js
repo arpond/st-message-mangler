@@ -783,8 +783,9 @@ function renderTriggerPanel(effect) {
 function renderScaleSteps(effect) {
     const rows = effect.llmRewrite.scaleSteps.map((step, i) => `
         <div class="st_mangler_scale_step">
-            ${field('number', `llmRewrite.scaleSteps.${i}.threshold`, step.threshold, 'min="0" max="1" step="0.05" style="max-width: 5em;"')}
-            ${field('textarea', `llmRewrite.scaleSteps.${i}.text`, step.text, 'rows="2" placeholder="Instruction text for this threshold and above"')}
+            <span class="st_mangler_scale_step_label">Level &ge;</span>
+            ${field('number', `llmRewrite.scaleSteps.${i}.threshold`, step.threshold, 'min="0" max="1" step="0.05"')}
+            ${field('textarea', `llmRewrite.scaleSteps.${i}.text`, step.text, 'rows="1" placeholder="Instruction text for this threshold and above"')}
             <div class="menu_button menu_button_icon st_mangler_scale_step_delete" data-step-index="${i}" title="Delete step">
                 <i class="fa-solid fa-trash"></i>
             </div>
@@ -868,10 +869,26 @@ function renderTestPanel(effect) {
 // rather than adding another field to the saved effect shape.
 const expandedEffectIds = new Set();
 
+// Session-only, same convention as expandedEffectIds — which tab is showing per effect row.
+// Defaults to 'basics' for any effect with no entry (new/duplicated effects included).
+const effectActiveTab = new Map();
+
 const EFFECT_TYPE_LABELS = { regex: 'Regex replace', drunk: 'Drunk mangle', 'llm-rewrite': 'LLM rewrite' };
+
+const EFFECT_TABS = [
+    { id: 'basics', label: 'Basics' },
+    { id: 'trigger', label: 'Trigger' },
+    { id: 'behavior', label: 'Behavior' },
+    { id: 'test', label: 'Test' },
+];
 
 function renderEffectRow(effect) {
     const expanded = expandedEffectIds.has(effect.id);
+    const activeTab = effectActiveTab.get(effect.id) ?? 'basics';
+    const tabStrip = EFFECT_TABS.map(tab => `
+        <div class="st_mangler_tab_btn ${tab.id === activeTab ? 'active' : ''}" data-tab="${tab.id}">${tab.label}</div>`).join('');
+    const pane = (id, html) => `
+        <div class="st_mangler_tab_pane" data-tab="${id}" style="display: ${id === activeTab ? 'block' : 'none'};">${html}</div>`;
     return `
         <div class="st_mangler_effect" data-effect-id="${effect.id}">
             <div class="flex-container alignItemsCenter st_mangler_effect_header">
@@ -903,28 +920,31 @@ function renderEffectRow(effect) {
                         <option value="llm-rewrite" ${effect.type === 'llm-rewrite' ? 'selected' : ''}>LLM rewrite</option>
                     </select>
                 </div>
-                <label>
-                    Target${infoIcon("Whose message this effect's transform is applied to — independent of which speaker's messages drive detection (set in the Trigger panel below).")}
-                    <select class="st_mangler_field" data-field="target">
-                        <option value="user" ${effect.target === 'user' ? 'selected' : ''}>User messages</option>
-                        <option value="character" ${effect.target === 'character' ? 'selected' : ''}>AI messages</option>
-                        <option value="both" ${effect.target === 'both' ? 'selected' : ''}>Both</option>
-                    </select>
-                </label>
-                <label>
-                    Live awareness cue (optional)${infoIcon('Injected into the prompt only while this effect is active, so the character reacts to this specific moment (independent of any static World Info entry). Supports {{level}} / {{level_pct}}.')}
-                    ${field('textarea', 'awarenessCue', effect.awarenessCue, 'rows="2" placeholder="e.g. [System: the compulsion is currently at {{level_pct}}% — let it visibly affect your dialogue.]"')}
-                </label>
-                <label>
-                    Trigger:
-                    <select class="st_mangler_field" data-field="trigger.mode">
-                        <option value="always" ${effect.trigger.mode === 'always' ? 'selected' : ''}>Always (every message)</option>
-                        <option value="progressive" ${effect.trigger.mode === 'progressive' ? 'selected' : ''}>Progressive (escalates from detected activity)</option>
-                    </select>
-                </label>
-                ${renderTriggerPanel(effect)}
-                ${renderTypeFields(effect)}
-                ${renderTestPanel(effect)}
+                <div class="st_mangler_tab_strip">${tabStrip}</div>
+                ${pane('basics', `
+                    <label>
+                        Target${infoIcon("Whose message this effect's transform is applied to — independent of which speaker's messages drive detection (set in the Trigger tab).")}
+                        <select class="st_mangler_field" data-field="target">
+                            <option value="user" ${effect.target === 'user' ? 'selected' : ''}>User messages</option>
+                            <option value="character" ${effect.target === 'character' ? 'selected' : ''}>AI messages</option>
+                            <option value="both" ${effect.target === 'both' ? 'selected' : ''}>Both</option>
+                        </select>
+                    </label>
+                    <label>
+                        Live awareness cue (optional)${infoIcon('Injected into the prompt only while this effect is active, so the character reacts to this specific moment (independent of any static World Info entry). Supports {{level}} / {{level_pct}}.')}
+                        ${field('textarea', 'awarenessCue', effect.awarenessCue, 'rows="2" placeholder="e.g. [System: the compulsion is currently at {{level_pct}}% — let it visibly affect your dialogue.]"')}
+                    </label>`)}
+                ${pane('trigger', `
+                    <label>
+                        Trigger:
+                        <select class="st_mangler_field" data-field="trigger.mode">
+                            <option value="always" ${effect.trigger.mode === 'always' ? 'selected' : ''}>Always (every message)</option>
+                            <option value="progressive" ${effect.trigger.mode === 'progressive' ? 'selected' : ''}>Progressive (escalates from detected activity)</option>
+                        </select>
+                    </label>
+                    ${renderTriggerPanel(effect)}`)}
+                ${pane('behavior', renderTypeFields(effect))}
+                ${pane('test', renderTestPanel(effect))}
             </div>
         </div>`;
 }
@@ -1207,6 +1227,17 @@ function addSettingsUI() {
         if (file) await importEffectsFromFile(file, settings);
     });
 
+    $('#st_mangler_effects').on('click', '.st_mangler_tab_btn', function () {
+        const row = $(this).closest('.st_mangler_effect');
+        const id = row.data('effect-id');
+        const tab = $(this).data('tab');
+        effectActiveTab.set(id, tab);
+        row.find('.st_mangler_tab_btn').removeClass('active');
+        $(this).addClass('active');
+        row.find('.st_mangler_tab_pane').hide();
+        row.find(`.st_mangler_tab_pane[data-tab="${tab}"]`).show();
+    });
+
     $('#st_mangler_effects').on('click', '.st_mangler_effect_toggle', function () {
         const id = $(this).closest('.st_mangler_effect').data('effect-id');
         if (expandedEffectIds.has(id)) expandedEffectIds.delete(id); else expandedEffectIds.add(id);
@@ -1245,6 +1276,7 @@ function addSettingsUI() {
         if (effect) context.setExtensionPrompt(awarenessCueKey(effect), '', extension_prompt_types.IN_CHAT, 0);
         settings.effects = settings.effects.filter(e => e.id !== id);
         expandedEffectIds.delete(id);
+        effectActiveTab.delete(id);
         refreshEffectList(settings);
         context.saveSettingsDebounced();
     });
