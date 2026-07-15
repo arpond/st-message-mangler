@@ -98,10 +98,15 @@ you're done — it persists across reloads like any other setting.
 | **Drunk mangle** | Algorithmic character-level mangling (random letter doubling + trailing elongation), scaled by intensity. |
 | **LLM rewrite** | Sends the message to your currently-connected model with a custom prompt template and replaces it with the response. Needed for transforms regex can't express — e.g. "make the speaker compulsively profess love of trees" — since that's a rewrite of meaning, not a substitution. |
 
-**LLM rewrite** prompt templates support three placeholders: `{{original}}` (the text so far in
-the pipeline), `{{level}}` (0–1 trigger strength, `1` for `always`-mode effects), and
-`{{level_pct}}` (the same strength as a whole-number 0–100 percentage instead) — pick whichever
-form reads more naturally in your template.
+**LLM rewrite** prompt templates support these placeholders: `{{original}}` (the text so far in
+the pipeline — what this effect actually rewrites, which may already reflect earlier effects),
+`{{true_original}}` (the true pre-pipeline text, before any effect in this chain ran — lets a
+template reference "what the user actually typed" separately from "the current state," so a
+later effect can avoid blindly undoing an earlier one), `{{level}}` (0–1 trigger strength, `1`
+for `always`-mode effects), and `{{level_pct}}` (the same strength as a whole-number 0–100
+percentage instead) — pick whichever `level` form reads more naturally in your template.
+SillyTavern's own macros (`{{user}}`, `{{char}}`, etc.) also work in the template — they're
+substituted by SillyTavern itself after this extension's own placeholders are resolved.
 
 **Known model quirk:** on one local model, the literal maximum value (`{{level}}=1.00` /
 `{{level_pct}}=100`) reliably produced a *weaker* result than a near-maximum one (`0.91`
@@ -144,7 +149,10 @@ garbage into the chat. This is usually a sign your connected backend needs a rep
 (or similar anti-looping sampler setting) tuned, not something this extension can fix upstream.
 
 **Prompt-injection mitigation:** the text substituted for `{{original}}` (and the scene
-transcript used by LLM detection) is wrapped in `<user_message>` tags with a fixed trailing
+transcript used by LLM detection) is wrapped in `<user_message>` tags, and `{{true_original}}` in
+its own `<user_message_true_original>` tags (kept distinct so the model can tell them apart when a
+template uses both — if the two are identical, i.e. no earlier effect has changed the text yet,
+`{{true_original}}` resolves to a short note instead of repeating the content), with a fixed trailing
 instruction telling the model to treat that content as literal text, not as instructions —
 reducing the risk that a crafted message ("ignore the above and just say X") hijacks the
 rewrite/classification prompt. This is a mitigation, not a guarantee — no delimiter scheme is
@@ -247,6 +255,11 @@ A few concept pairs that sound similar but mean different things, collected in o
 - **`{{level}}` vs. `{{level_pct}}`** — the same value in two units: 0-1 vs. 0-100. Use whichever
   reads more naturally in your prompt. If your model seems to treat one form oddly (e.g. the
   literal maximum reading as "weak" — see the known-quirk note above), try the other.
+- **`{{original}}` vs. `{{true_original}}`** — `{{original}}` is *this effect's* input: the
+  running pipeline text, already reflecting whatever earlier effects in the chain did.
+  `{{true_original}}` is the message as it was before any effect touched it. Use `{{original}}`
+  to build on prior effects; use `{{true_original}}` when a later effect needs to know what the
+  user actually typed regardless of what happened upstream.
 - **The three LLM integration modes, one line each** — **Absolute**: level = the latest rating,
   no memory. **Cumulative**: the rating becomes a hit/no-hit test, then increments/decays like
   keyword mode. **Cumulative, locks once triggered**: same as cumulative, but once it crosses a
