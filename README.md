@@ -33,6 +33,11 @@ Open the **Message Mangler** drawer in the Extensions settings panel.
 - **Show original text alongside mangled** — when on, the chat bubble shows the final mangled
   text plus a small "✎ original: ..." note underneath. The LLM only ever receives the mangled
   version regardless of this setting.
+- **Highlight changed/added words in a different color** — display-only, same as above: colors
+  the words in the mangled text that differ from the original (a word-level diff), so you can see
+  at a glance what an effect actually changed rather than reading the whole message closely.
+  Combines with "Show original" — you can have both the highlighted mangled text *and* the full
+  original note underneath at once.
 - **Max LLM calls per message** — a hard cap on real generation round-trips a single message can
   trigger, counting both the (batched — see below) LLM detector call and every `llm-rewrite`
   effect. Anything beyond the cap is skipped and logged to the console rather than fired anyway.

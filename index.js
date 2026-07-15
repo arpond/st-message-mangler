@@ -54,6 +54,7 @@ function defaultEffect(type = 'regex') {
 const DEFAULT_SETTINGS = {
     enabled: true,
     showOriginal: false,
+    highlightChanges: false,
     maxLlmCallsPerMessage: 3,
     generateTimeoutMs: 60000, // per-attempt timeout for any LLM call (detector or rewrite); see generateRawWithRetry
     debug: false, // no UI control on purpose — toggle from the browser console:
@@ -558,6 +559,49 @@ function escapeHtmlForDisplay(text) {
     })[c]);
 }
 
+// Word-level longest-common-subsequence diff: wraps words in `mangled` that AREN'T part of the
+// LCS with `original` in a highlight span, so only what actually changed is colored. Display-only
+// (called while building message.extra.display_text) — never touches message.mes/what the model
+// receives. Guarded against pathological input length since it's a standard O(n*m) DP.
+function wordDiffHighlight(original, mangled) {
+    const origWords = original.split(/(\s+)/);
+    const newWords = mangled.split(/(\s+)/);
+    if (origWords.length > 1000 || newWords.length > 1000) return escapeHtmlForDisplay(mangled);
+
+    const n = origWords.length, m = newWords.length;
+    const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+    for (let i = n - 1; i >= 0; i--) {
+        for (let j = m - 1; j >= 0; j--) {
+            dp[i][j] = origWords[i] === newWords[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+        }
+    }
+
+    const keep = new Array(m).fill(false);
+    let i = 0, j = 0;
+    while (i < n && j < m) {
+        if (origWords[i] === newWords[j]) { keep[j] = true; i++; j++; }
+        else if (dp[i + 1][j] >= dp[i][j + 1]) i++;
+        else j++;
+    }
+
+    return newWords.map((w, idx) => {
+        const esc = escapeHtmlForDisplay(w);
+        return /^\s+$/.test(w) || keep[idx] ? esc : `<span class="st_mangler_changed">${esc}</span>`;
+    }).join('');
+}
+
+// Shared by onMessageSent/onCharacterMessageRendered — both used to duplicate this logic.
+// Returns null when neither display option is on (caller should clear display_text/mangler_original).
+function buildDisplayText(mangled, original, settings) {
+    if (!settings.showOriginal && !settings.highlightChanges) return null;
+    // Only escaped inside wordDiffHighlight (which builds its own HTML) — otherwise `mangled` is
+    // passed through raw, same as it always was, so normal chat markdown still renders correctly.
+    const base = settings.highlightChanges ? wordDiffHighlight(original, mangled) : mangled;
+    return settings.showOriginal
+        ? `${base}\n\n<div class="st_mangler_original">✎ original: ${escapeHtmlForDisplay(original)}</div>`
+        : base;
+}
+
 async function onMessageSent(chatId) {
     const settings = getSettings();
     debugLog(`onMessageSent: chatId=${chatId}, extension enabled=${settings.enabled}`);
@@ -579,9 +623,10 @@ async function onMessageSent(chatId) {
     message.mes = mangled;
     message.extra = message.extra || {};
 
-    if (settings.showOriginal) {
-        message.extra.mangler_original = original;
-        message.extra.display_text = `${mangled}\n\n<div class="st_mangler_original">✎ original: ${escapeHtmlForDisplay(original)}</div>`;
+    const displayText = buildDisplayText(mangled, original, settings);
+    if (displayText !== null) {
+        message.extra.display_text = displayText;
+        if (settings.showOriginal) message.extra.mangler_original = original; else delete message.extra.mangler_original;
     } else {
         delete message.extra.display_text;
         delete message.extra.mangler_original;
@@ -617,9 +662,10 @@ async function onCharacterMessageRendered(chatId) {
     message.mes = mangled;
     message.extra = message.extra || {};
 
-    if (settings.showOriginal) {
-        message.extra.mangler_original = original;
-        message.extra.display_text = `${mangled}\n\n<div class="st_mangler_original">✎ original: ${escapeHtmlForDisplay(original)}</div>`;
+    const displayText = buildDisplayText(mangled, original, settings);
+    if (displayText !== null) {
+        message.extra.display_text = displayText;
+        if (settings.showOriginal) message.extra.mangler_original = original; else delete message.extra.mangler_original;
     } else {
         delete message.extra.display_text;
         delete message.extra.mangler_original;
@@ -918,6 +964,10 @@ function addSettingsUI() {
                         <input id="st_mangler_show_original" type="checkbox" ${settings.showOriginal ? 'checked' : ''} />
                         Show original text alongside mangled (display only — the LLM only ever sees the final mangled version)
                     </label>
+                    <label class="checkbox_label">
+                        <input id="st_mangler_highlight_changes" type="checkbox" ${settings.highlightChanges ? 'checked' : ''} />
+                        Highlight changed/added words in a different color (display only — combines with "Show original" above)
+                    </label>
                     <label>
                         Max LLM calls per message (caps detector + rewrite round-trips combined):
                         <input id="st_mangler_max_llm_calls" type="number" min="0" max="20" class="text_pole" style="max-width: 5em;" value="${settings.maxLlmCallsPerMessage}" />
@@ -954,6 +1004,10 @@ function addSettingsUI() {
     });
     $('#st_mangler_show_original').on('input', function () {
         settings.showOriginal = !!$(this).prop('checked');
+        context.saveSettingsDebounced();
+    });
+    $('#st_mangler_highlight_changes').on('input', function () {
+        settings.highlightChanges = !!$(this).prop('checked');
         context.saveSettingsDebounced();
     });
     $('#st_mangler_max_llm_calls').on('input', function () {
