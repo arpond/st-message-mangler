@@ -290,6 +290,45 @@ A few concept pairs that sound similar but mean different things, collected in o
   the matching one in code, handing the model only the resolved text via `{{scale_instruction}}`
   — no numeral interpretation involved in band selection at all.
 
+### Troubleshooting
+
+Real issues hit (and fixed) while building this extension against local models — if you're
+seeing one of these, this is likely why.
+
+- **Per-chat state (levels, locks) seemed to leak between chats.** Fixed — caused by caching
+  SillyTavern's `chatMetadata` reference at load time instead of re-fetching it fresh, since ST
+  reassigns that object on every chat switch. If you're on an old version, update.
+- **Sending a message hangs, or never renders, when an LLM-rewrite effect and an LLM-detector
+  effect are both active on the same message.** Two concurrent `generateRaw` calls to the same
+  backend have been observed to break SillyTavern's send flow entirely on some setups (especially
+  local single-worker backends). The extension already serializes these two calls when both are
+  active on the same message — if you're still seeing this, it may be a different concurrency
+  path; enable **Debug logging** (below) and check the console.
+- **LLM classification (progressive triggers) never detects anything, or always returns
+  nothing.** If your connected model does explicit reasoning before answering, a
+  JSON-schema-constrained response format can starve it of room to think and come back empty.
+  Detection here is deliberately free-form (the model may reason, then must end with one
+  `<effect-id>: <rating>` line per condition, extracted by regex) rather than schema-constrained,
+  specifically to avoid this. If ratings still aren't coming through, check the condition
+  description in **Condition to detect** — a vague label gives the classifier little to work
+  with.
+- **An `llm-rewrite` effect feels weaker at maximum strength (`{{level}}=1.00`/`{{level_pct}}=100`)
+  than at a near-maximum one.** Observed on one local model, reproduced across repeated identical
+  runs: the literal numeral "1"/"100" is heavily associated with "lowest" in a lot of training
+  data. The extension already caps what's substituted into `{{level}}`/`{{level_pct}}` at
+  `0.99`/`99` to route around this. If you're writing level-banded prose ("below 0.3: X, above
+  0.9: Z") and still seeing weirdness at the boundaries, switch that effect to **Structured
+  steps** scaling mode — band *selection* happens in code there, so the model never has to read a
+  number at all.
+- **Using Continue on a mangled AI message reprocessed the whole thing again, or "Show original"
+  started showing the wrong text.** Fixed — Continue appends new text onto the message's existing
+  (already-mangled) content and re-triggers the same rendering hook, with no way to tell that
+  apart from a fresh message. The extension now detects this (the current text still starts with
+  what it last wrote) and only processes the newly generated portion. One known edge case: a
+  manual in-place edit that happens to preserve the existing mangled prefix looks the same as a
+  Continue to this check — worst case it only reprocesses the edited part instead of the whole
+  message.
+
 ## How it works
 
 Hooks the `MESSAGE_SENT` event, which SillyTavern fires right after your message is added to

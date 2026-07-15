@@ -10,6 +10,7 @@ successive rounds of development.
   mangled AI message no longer reprocesses the whole message (compounding regex/drunk/llm-rewrite
   transforms) or corrupts "Show original." The extension now detects when new text has been
   appended onto previously-mangled content and only processes the new portion.
+- **Troubleshooting section** in the README consolidating known model quirks and past bugs.
 
 ## v12
 
