@@ -54,6 +54,7 @@ function defaultEffectShape(type = 'regex') {
             scaleMode: 'freeform', // 'freeform' | 'steps' — steps resolves {{scale_instruction}} in code instead of relying on the model to read {{level}}/{{level_pct}} and map it onto prose bands itself
             scaleSteps: [], // [{ threshold: 0-1, text }] — used only when scaleMode === 'steps'
             sceneLookback: 4, // how many recent chat messages to expose as {{scene}} — 0 disables it
+            maxResponseTokens: 600, // ceiling on runLlmRewrite's response-length budget — was a fixed 600 for every effect; a rewrite that expands/elaborates on a long input could get cut off mid-sentence at that ceiling
         },
     };
 }
@@ -468,9 +469,12 @@ async function runLlmRewrite(text, effect, level, trueOriginal, respondingTo = '
         + INJECTION_GUARD
         + '\n\nRespond with ONLY the rewritten message — no reasoning, no explanation, no preamble.';
     // Cap output length relative to the input as a cheap backstop against runaway/looping
-    // generations — generous enough for a real rewrite (up to 6x the original, floor 80,
-    // ceiling 600 tokens) without letting a stuck decode loop run unbounded.
-    const responseLength = Math.min(600, Math.max(80, Math.ceil(text.length / 3) * 6));
+    // generations — generous enough for a real rewrite (up to 6x the original, floor 80 tokens)
+    // without letting a stuck decode loop run unbounded. The ceiling is per-effect configurable
+    // (effect.llmRewrite.maxResponseTokens, default 600) since a fixed ceiling could truncate an
+    // expansion-style rewrite mid-sentence on a long input — 6x a ~300-char message already hits
+    // the old hardcoded 600.
+    const responseLength = Math.min(effect.llmRewrite.maxResponseTokens, Math.max(80, Math.ceil(text.length / 3) * 6));
     debugLog(`runLlmRewrite "${effect.label}": level=${level.toFixed(2)} (sent to model as ${promptLevel.toFixed(2)}), promptLength=${prompt.length} chars, responseLength cap=${responseLength} tokens`);
     try {
         const result = await generateRawWithRetry({ prompt, responseLength }, `llm-rewrite effect "${effect.label}"`);
@@ -923,6 +927,10 @@ function renderTypeFields(effect) {
                     <label>
                         Scene lookback (messages)${infoIcon('How many of the most recent chat messages to expose as {{scene}} in the template — speaker names + full text, same mechanism as the LLM detector\'s classification transcript. 0 disables it.')}
                         ${field('number', 'llmRewrite.sceneLookback', effect.llmRewrite.sceneLookback, 'min="0" max="30" style="max-width: 5em;"')}
+                    </label>
+                    <label>
+                        Max response length (tokens)${infoIcon('Ceiling on how long a rewrite reply can be — a backstop against a stuck/looping generation, not just a style choice. Scales with input length up to this ceiling (6x the input, floor 80 tokens). Raise it if an effect that expands/elaborates on long messages is getting cut off mid-sentence; the tradeoff is more tokens/latency per call.')}
+                        ${field('number', 'llmRewrite.maxResponseTokens', effect.llmRewrite.maxResponseTokens, 'min="80" max="4000" step="20" style="max-width: 6em;"')}
                     </label>
                     <label>
                         Scaling${infoIcon('Freeform: write level-dependent behavior as prose inside the template above, using {{level}}/{{level_pct}} directly. Structured steps: define threshold+text steps below; code picks the matching step\'s text for the current level and exposes it as {{scale_instruction}} in the template, so band selection never depends on the model reading a number.')}

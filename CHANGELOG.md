@@ -4,6 +4,13 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v24
+
+- **Configurable max response length for `llm-rewrite`** — the response-length ceiling (was a
+  fixed 600 tokens for every effect, regardless of input length) is now per-effect configurable.
+  An effect that expands/elaborates on longer messages could get cut off mid-sentence at the old
+  fixed ceiling; raise it if that's happening. Default (600) is unchanged.
+
 ## v23
 
 - **Moved the enabled checkbox into the collapsed effect row** — toggling an effect on/off no
