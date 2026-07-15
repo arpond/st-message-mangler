@@ -14,12 +14,18 @@
     cursor: pointer;
 }
 
-.st-message-mangler-settings .st_mangler_effect_summary_label {
+.st-message-mangler-settings .st_mangler_effect_title_input {
     flex: 1;
     font-weight: bold;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    border: 1px solid transparent;
+    background: transparent;
+    min-width: 3em;
+}
+
+.st-message-mangler-settings .st_mangler_effect_title_input:hover,
+.st-message-mangler-settings .st_mangler_effect_title_input:focus {
+    border-color: var(--SmartThemeBorderColor, #444);
+    background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.15));
 }
 
 .st-message-mangler-settings .st_mangler_effect_summary_type {

@@ -1009,7 +1009,7 @@ function renderEffectRow(effect) {
                 <div class="menu_button menu_button_icon st_mangler_effect_toggle" title="${expanded ? 'Collapse' : 'Expand'}">
                     <i class="fa-solid ${expanded ? 'fa-chevron-down' : 'fa-chevron-right'}"></i>
                 </div>
-                <span class="st_mangler_effect_summary_label">${escapeHtmlForDisplay(effect.label) || '<i>(unlabeled)</i>'}</span>
+                <input type="text" class="text_pole st_mangler_field st_mangler_effect_title_input" data-field="label" value="${escapeHtmlForDisplay(effect.label)}" placeholder="(unlabeled)" title="Effect label" />
                 <span class="st_mangler_effect_summary_type">${EFFECT_TYPE_LABELS[effect.type] ?? effect.type}</span>
                 ${effectStatusBadgeHtml(effect)}
                 <div class="menu_button menu_button_icon st_mangler_effect_move_up" title="Move up"><i class="fa-solid fa-arrow-up"></i></div>
@@ -1027,7 +1027,6 @@ function renderEffectRow(effect) {
             <div class="st_mangler_effect_body" style="display: ${expanded ? 'block' : 'none'};">
                 <div class="flex-container alignItemsCenter">
                     <input type="checkbox" class="st_mangler_field" data-field="enabled" ${effect.enabled ? 'checked' : ''} title="Enabled" />
-                    ${field('text', 'label', effect.label, 'placeholder="Label"')}
                     <select class="st_mangler_field" data-field="type">
                         <option value="regex" ${effect.type === 'regex' ? 'selected' : ''}>Regex replace</option>
                         <option value="drunk" ${effect.type === 'drunk' ? 'selected' : ''}>Drunk mangle</option>

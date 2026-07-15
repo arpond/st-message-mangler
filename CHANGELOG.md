@@ -4,6 +4,13 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v21
+
+- **Fixed the effect label not updating its collapsed-row title until reload** — the label is now
+  a single editable field directly in the effect's header (whether expanded or collapsed) instead
+  of a separate display span plus a separate input in the body, so there's no longer two copies
+  that can fall out of sync.
+
 ## v20
 
 - **Test detection, not just the transform** — progressive effects now have a **Test detection**
