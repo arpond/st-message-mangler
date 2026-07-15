@@ -1329,7 +1329,7 @@ function addSettingsUI() {
         if (!effect) return;
         const count = Number(row.find('.st_mangler_scale_gen_count').val());
         const curve = row.find('.st_mangler_scale_gen_curve').val();
-        effect.llmRewrite.scaleSteps = generateScaleSteps(count, curve);
+        effect.llmRewrite.scaleSteps = generateScaleSteps(count, curve, effect.llmRewrite.scaleSteps);
         refreshEffectList(settings);
         context.saveSettingsDebounced();
     });

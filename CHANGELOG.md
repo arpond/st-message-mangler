@@ -9,6 +9,9 @@ successive rounds of development.
 - **Reduced false positives in degenerate-output detection** — the phrase-repeat check now only
   flags repeats that occur close together (within a few sentences of each other); the same phrase
   recurring for emphasis across a longer, otherwise-varied passage no longer trips it.
+- **Regenerating scale steps preserves existing text** when the step count is unchanged — only
+  the thresholds get re-spaced, so switching curve shape no longer wipes out instructions you'd
+  already written.
 
 ## v14
 

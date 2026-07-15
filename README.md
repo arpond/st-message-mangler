@@ -133,9 +133,10 @@ still wants the raw number.
 
 Building a ladder of several steps by hand gets tedious — the **Generate** control above the step
 list fills in N steps at computed thresholds in one click (Linear: evenly spaced; Exponential:
-clustered toward the low end, more resolution for subtle early changes), leaving each step's text
-blank for you to fill in. It replaces whatever steps are already there, so use it as a starting
-point before writing the instruction text, not to tweak an existing ladder.
+clustered toward the low end, more resolution for subtle early changes). It replaces whatever
+steps are already there — if the step count is unchanged, each step's existing text is carried
+over at its new (re-spaced) threshold; if the count changes, text comes back blank since there's
+no meaningful way to map old bands onto a different number of new ones.
 
 Example:
 

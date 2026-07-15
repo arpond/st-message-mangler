@@ -236,3 +236,16 @@ test('generateScaleSteps clamps a non-positive or NaN count to 1 step', () => {
     assert.deepEqual(generateScaleSteps(-5, 'linear'), [{ threshold: 0, text: '' }]);
     assert.deepEqual(generateScaleSteps(NaN, 'linear'), [{ threshold: 0, text: '' }]);
 });
+
+test('generateScaleSteps preserves text by position when the step count matches', () => {
+    const previous = [{ threshold: 0, text: 'calm' }, { threshold: 0.5, text: 'agitated' }, { threshold: 1, text: 'furious' }];
+    const steps = generateScaleSteps(3, 'exponential', previous);
+    assert.deepEqual(steps.map(s => s.text), ['calm', 'agitated', 'furious']);
+    assert.deepEqual(steps.map(s => s.threshold), [0, 0.25, 1]);
+});
+
+test('generateScaleSteps blanks text when the step count changes', () => {
+    const previous = [{ threshold: 0, text: 'calm' }, { threshold: 1, text: 'furious' }];
+    const steps = generateScaleSteps(3, 'linear', previous);
+    assert.deepEqual(steps.map(s => s.text), ['', '', '']);
+});
