@@ -980,6 +980,76 @@ function renderDetectionProfileOptions(settings) {
         </select>`;
 }
 
+// Case-insensitive exact match on label. If more than one effect shares a label, the first
+// match wins — labels aren't enforced unique, and disambiguating further would add complexity
+// for a rare case (single-effect export already has the same "first-match-ish" simplification
+// via its filename slug).
+function findEffectByLabel(settings, label) {
+    const needle = label.trim().toLowerCase();
+    return settings.effects.find(e => e.label.trim().toLowerCase() === needle);
+}
+
+// A fast in-chat toggle for effects, so turning one on/off doesn't require opening the full
+// settings panel. Mirrors the built-in Regex extension's /regex-toggle command (name/state/quiet
+// shape, enumProvider for autocomplete) since that's the closest existing precedent for
+// "toggle a named script-like thing via slash command."
+function registerSlashCommands() {
+    context.SlashCommandParser.addCommandObject(context.SlashCommand.fromProps({
+        name: 'mangler-toggle',
+        callback: (args, effectLabel) => {
+            if (typeof effectLabel !== 'string' || !effectLabel) {
+                toastr.warning('Message Mangler: no effect label provided.');
+                return '';
+            }
+            const settings = getSettings();
+            const effect = findEffectByLabel(settings, effectLabel);
+            if (!effect) {
+                toastr.warning(`Message Mangler: effect "${effectLabel}" not found.`);
+                return '';
+            }
+            const state = args?.state;
+            effect.enabled = state === 'on' ? true : state === 'off' ? false : !effect.enabled;
+            context.saveSettingsDebounced();
+            refreshEffectList(settings);
+            log(`Slash command toggled "${effect.label}" -> ${effect.enabled ? 'enabled' : 'disabled'}.`);
+            toastr.success(`Message Mangler: "${effect.label}" is now ${effect.enabled ? 'enabled' : 'disabled'}.`);
+            return effect.enabled ? 'on' : 'off';
+        },
+        returns: 'the effect\'s new state ("on" or "off")',
+        namedArgumentList: [
+            context.SlashCommandNamedArgument.fromProps({
+                name: 'state',
+                description: 'Explicitly set the state (\'on\' to enable, \'off\' to disable). If omitted, toggles the current state.',
+                typeList: [context.ARGUMENT_TYPE.STRING],
+                enumList: [
+                    new context.SlashCommandEnumValue('on'),
+                    new context.SlashCommandEnumValue('off'),
+                ],
+            }),
+        ],
+        unnamedArgumentList: [
+            context.SlashCommandArgument.fromProps({
+                description: 'effect label',
+                typeList: [context.ARGUMENT_TYPE.STRING],
+                isRequired: true,
+                enumProvider: () => getSettings().effects.map(e =>
+                    new context.SlashCommandEnumValue(e.label || e.id, `${e.enabled ? 'enabled' : 'disabled'} · ${EFFECT_TYPE_LABELS[e.type] ?? e.type}`),
+                ),
+            }),
+        ],
+        helpString: `
+            <div>Enables/disables a Message Mangler effect by label without opening the settings panel.</div>
+            <div>
+                <strong>Example:</strong>
+                <ul>
+                    <li><pre><code class="language-stscript">/mangler-toggle Drunk mode</code></pre></li>
+                    <li><pre><code class="language-stscript">/mangler-toggle state=off Drunk mode</code></pre></li>
+                </ul>
+            </div>
+        `,
+    }));
+}
+
 function addSettingsUI() {
     const settings = getSettings();
     const html = `
@@ -1024,6 +1094,12 @@ function addSettingsUI() {
                     <div class="flex-container">
                         <div id="st_mangler_add_effect" class="menu_button menu_button_icon">
                             <i class="fa-solid fa-plus"></i> Add effect
+                        </div>
+                        <div id="st_mangler_expand_all" class="menu_button menu_button_icon">
+                            <i class="fa-solid fa-angles-down"></i> Expand all
+                        </div>
+                        <div id="st_mangler_collapse_all" class="menu_button menu_button_icon">
+                            <i class="fa-solid fa-angles-up"></i> Collapse all
                         </div>
                         <div id="st_mangler_export" class="menu_button menu_button_icon">
                             <i class="fa-solid fa-download"></i> Export effects
@@ -1070,6 +1146,15 @@ function addSettingsUI() {
         expandedEffectIds.add(effect.id); // newly added effects open expanded, ready to configure
         refreshEffectList(settings);
         context.saveSettingsDebounced();
+    });
+
+    $('#st_mangler_expand_all').on('click', () => {
+        for (const effect of settings.effects) expandedEffectIds.add(effect.id);
+        refreshEffectList(settings);
+    });
+    $('#st_mangler_collapse_all').on('click', () => {
+        expandedEffectIds.clear();
+        refreshEffectList(settings);
     });
 
     $('#st_mangler_export').on('click', () => exportEffects(settings));
@@ -1176,6 +1261,7 @@ function addSettingsUI() {
 
 getSettings();
 addSettingsUI();
+registerSlashCommands();
 context.eventSource.on(context.eventTypes.MESSAGE_SENT, onMessageSent);
 context.eventSource.on(context.eventTypes.CHARACTER_MESSAGE_RENDERED, onCharacterMessageRendered);
 context.eventSource.on(context.eventTypes.CHAT_CHANGED, () => clearAllAwarenessCues(getSettings()));
