@@ -9,7 +9,7 @@ import { removeReasoningFromString } from '../../../reasoning.js';
 import { extension_prompt_types, extension_prompt_roles } from '../../../../script.js';
 import {
     clamp01, escapeRegExp, matchesKeywordList, applyRegexEffect, applyDrunk,
-    looksDegenerate, escapeHtmlForDisplay, wordDiffHighlight, backfillDefaults,
+    looksDegenerate, escapeHtmlForDisplay, wordDiffHighlight, backfillDefaults, resolveAwarenessCue,
 } from './lib/pure.js';
 
 const context = SillyTavern.getContext();
@@ -482,12 +482,7 @@ function updateAwarenessCue(effect, level, active) {
         context.setExtensionPrompt(key, '', extension_prompt_types.IN_CHAT, 0);
         return;
     }
-    // Same 0.99 cap as runLlmRewrite's promptLevel — routes around the same local-model quirk
-    // where the literal maximum reads as "weak" rather than maximum.
-    const promptLevel = Math.min(level, 0.99);
-    const cue = effect.awarenessCue
-        .replaceAll('{{level}}', promptLevel.toFixed(2))
-        .replaceAll('{{level_pct}}', String(Math.round(promptLevel * 100)));
+    const cue = resolveAwarenessCue(effect.awarenessCue, level);
     context.setExtensionPrompt(key, cue, extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
 }
 
@@ -663,6 +658,10 @@ async function onCharacterMessageRendered(chatId) {
 // path via the delegated 'input' handler in addSettingsUI(). Cuts the near-identical
 // type/class/data-field/value boilerplate previously repeated by hand across the render*
 // functions below, and keeps the escaping rule (string values only) in one place.
+function infoIcon(text) {
+    return `<i class="fa-solid fa-circle-info st_mangler_info_icon" title="${escapeHtmlForDisplay(text)}"></i>`;
+}
+
 function field(inputType, dataField, value, attrs = '') {
     const val = typeof value === 'string' ? escapeHtmlForDisplay(value) : value;
     if (inputType === 'textarea') {
@@ -688,7 +687,7 @@ function renderTriggerPanel(effect) {
                 </select>
             </label>
             <label class="st_mangler_trigger_row">
-                Detect from — whose messages are allowed to update this effect's level:
+                Detect from${infoIcon("Whose messages are allowed to update this effect's level.")}
                 <select class="st_mangler_field" data-field="trigger.detectSource">
                     <option value="both" ${effect.trigger.detectSource === 'both' ? 'selected' : ''}>Both (default)</option>
                     <option value="user" ${effect.trigger.detectSource === 'user' ? 'selected' : ''}>User messages only</option>
@@ -700,8 +699,7 @@ function renderTriggerPanel(effect) {
                 ${field('text', 'trigger.keywords', effect.trigger.keywords)}
             </label>
             <label class="st_mangler_trigger_row" style="display: ${isKeyword ? 'none' : 'block'};">
-                Condition to detect — describe in plain language what the model should judge is happening
-                (e.g. "the speaker is under a magical compulsion to talk about trees"):
+                Condition to detect${infoIcon('Describe in plain language what the model should judge is happening (e.g. "the speaker is under a magical compulsion to talk about trees").')}
                 ${field('text', 'trigger.llmCondition', effect.trigger.llmCondition, 'placeholder="Describe the condition for the classifier"')}
             </label>
             <label class="st_mangler_trigger_row" style="display: ${isKeyword ? 'none' : 'block'};">
@@ -739,7 +737,7 @@ function renderTriggerPanel(effect) {
             </label>
             <div class="st_mangler_trigger_section_header">Safety</div>
             <label class="st_mangler_trigger_row">
-                Dispel keywords (comma-separated — any match forces the level to 0 immediately):
+                Dispel keywords${infoIcon('Comma-separated — any match forces the level to 0 immediately.')}
                 ${field('text', 'trigger.dispelKeywords', effect.trigger.dispelKeywords)}
             </label>
             <label class="st_mangler_trigger_row">
@@ -777,16 +775,8 @@ function renderTypeFields(effect) {
         case 'llm-rewrite':
             return `
                 <div class="st_mangler_type_fields">
-                    <small>This calls your connected AI model to rewrite the text, and waits for the reply —
-                    sending a message will pause for however long a normal generation takes.</small>
-                    <small>Instructions for how to rewrite the message. Three placeholders are available:
-                    <code>{{original}}</code> = the message text so far (this is what gets rewritten);
-                    <code>{{level}}</code> = current trigger strength as a number from 0 to 1 (1 for "Always"
-                    effects); <code>{{level_pct}}</code> = the same strength as a whole-number percentage
-                    (0-100) instead. Some models respond more reliably to one form than the other — the
-                    literal numeral "1" is heavily associated with "lowest"/"level one" in a lot of training
-                    data, which can make a model treat {{level}}=1.00 as weak rather than maximum; if you see
-                    that, try {{level_pct}} instead (100 doesn't carry the same "lowest" association).</small>
+                    <small>Calls your connected AI model to rewrite the text and waits for the reply — sending
+                    a message will pause for however long a normal generation takes.${infoIcon('Instructions for how to rewrite the message. Three placeholders are available: {{original}} = the message text so far (this is what gets rewritten); {{level}} = current trigger strength as a number from 0 to 1 (1 for "Always" effects); {{level_pct}} = the same strength as a whole-number percentage (0-100) instead. Some models respond more reliably to one form than the other — the literal numeral "1" is heavily associated with "lowest"/"level one" in a lot of training data, which can make a model treat {{level}}=1.00 as weak rather than maximum; if you see that, try {{level_pct}} instead (100 doesn\'t carry the same "lowest" association).')}</small>
                     ${field('textarea', 'llmRewrite.promptTemplate', effect.llmRewrite.promptTemplate, 'rows="5" placeholder="e.g. Rewrite {{original}} so the speaker can\'t help professing their love of trees, at strength {{level}} (0=no change, 1=extreme)."')}
                 </div>`;
         default:
@@ -804,12 +794,17 @@ function renderTestPanel(effect) {
                 Test at level: <span class="st_mangler_test_level_val">1.00</span>
                 <input type="range" class="st_mangler_test_level" min="0" max="1" step="0.01" value="1" />
             </label>`;
+    // Preview-only: shows what updateAwarenessCue would actually inject at this level, without
+    // touching the live extension prompt (setExtensionPrompt isn't called here).
+    const cuePreview = effect.awarenessCue ? `
+            <small>Awareness cue at this level: <span class="st_mangler_test_cue_val">${escapeHtmlForDisplay(resolveAwarenessCue(effect.awarenessCue, 1))}</span></small>` : '';
     return `
         <div class="st_mangler_test_panel">
             <small><b>Test</b> (runs this effect alone on the sample text below, at the level set here):</small>
             ${note}
             <textarea class="text_pole textarea_compact st_mangler_test_input" rows="2" placeholder="Sample text to test against">The knight drew his sword and charged.</textarea>
             ${levelControl}
+            ${cuePreview}
             <div class="menu_button menu_button_icon st_mangler_test_run"><i class="fa-solid fa-play"></i> Run test</div>
             <textarea class="text_pole textarea_compact st_mangler_test_output" rows="2" readonly placeholder="Result appears here"></textarea>
         </div>`;
@@ -1077,14 +1072,11 @@ function addSettingsUI() {
                         <input id="st_mangler_max_llm_calls" type="number" min="0" max="20" class="text_pole" style="max-width: 5em;" value="${settings.maxLlmCallsPerMessage}" />
                     </label>
                     <label>
-                        Generation timeout (ms) — how long to wait on a single LLM call before treating it as
-                        failed (doesn't cancel the underlying request, just stops blocking the pipeline on it):
+                        Generation timeout (ms)${infoIcon("How long to wait on a single LLM call before treating it as failed. Doesn't cancel the underlying request, just stops blocking the pipeline on it.")}
                         <input id="st_mangler_generate_timeout" type="number" min="1000" max="300000" step="1000" class="text_pole" style="max-width: 7em;" value="${settings.generateTimeoutMs}" />
                     </label>
                     <label>
-                        Detection connection — send LLM classification through a different connection
-                        profile than the main chat (e.g. a cheaper/faster model). Rewrites always use
-                        the main connection.
+                        Detection connection${infoIcon('Send LLM classification through a different connection profile than the main chat (e.g. a cheaper/faster model). Rewrites always use the main connection.')}
                         ${renderDetectionProfileOptions(settings)}
                     </label>
                     <hr>
@@ -1218,7 +1210,12 @@ function addSettingsUI() {
     });
 
     $('#st_mangler_effects').on('input', '.st_mangler_test_level', function () {
-        $(this).closest('.st_mangler_test_panel').find('.st_mangler_test_level_val').text(Number($(this).val()).toFixed(2));
+        const level = Number($(this).val());
+        const panel = $(this).closest('.st_mangler_test_panel');
+        panel.find('.st_mangler_test_level_val').text(level.toFixed(2));
+        const row = $(this).closest('.st_mangler_effect');
+        const effect = settings.effects.find(e => e.id === row.data('effect-id'));
+        if (effect) panel.find('.st_mangler_test_cue_val').text(resolveAwarenessCue(effect.awarenessCue, level));
     });
 
     $('#st_mangler_effects').on('click', '.st_mangler_test_run', async function () {

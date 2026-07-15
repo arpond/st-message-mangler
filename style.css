@@ -109,3 +109,9 @@
     color: var(--SmartThemeQuoteColor, #e91e63);
     font-weight: 600;
 }
+
+.st_mangler_info_icon {
+    opacity: 0.6;
+    cursor: help;
+    margin-left: 0.3em;
+}

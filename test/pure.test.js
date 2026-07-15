@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
     clamp01, escapeRegExp, matchesKeywordList, applyRegexEffect, applyDrunk,
-    looksDegenerate, escapeHtmlForDisplay, wordDiffHighlight, backfillDefaults,
+    looksDegenerate, escapeHtmlForDisplay, wordDiffHighlight, backfillDefaults, resolveAwarenessCue,
 } from '../lib/pure.js';
 
 test('clamp01 clamps to [0, 1]', () => {
@@ -86,6 +86,16 @@ test('looksDegenerate does not flag normal prose with a short repeated dialogue 
 
 test('escapeHtmlForDisplay escapes the five HTML-significant characters', () => {
     assert.equal(escapeHtmlForDisplay(`<b>"tom" & 'jerry'</b>`), '&lt;b&gt;&quot;tom&quot; &amp; &#39;jerry&#39;&lt;/b&gt;');
+});
+
+test('resolveAwarenessCue returns empty string when no template is set', () => {
+    assert.equal(resolveAwarenessCue('', 1), '');
+    assert.equal(resolveAwarenessCue(undefined, 1), '');
+});
+
+test('resolveAwarenessCue substitutes {{level}} and {{level_pct}}, capped at 0.99/99', () => {
+    assert.equal(resolveAwarenessCue('cue at {{level}} / {{level_pct}}%', 1), 'cue at 0.99 / 99%');
+    assert.equal(resolveAwarenessCue('cue at {{level}} / {{level_pct}}%', 0.5), 'cue at 0.50 / 50%');
 });
 
 test('wordDiffHighlight marks only the words that actually changed', () => {
