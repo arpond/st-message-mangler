@@ -909,6 +909,9 @@ function renderEffectRow(effect) {
                 <div class="menu_button menu_button_icon st_mangler_effect_duplicate" title="Duplicate effect">
                     <i class="fa-solid fa-copy"></i>
                 </div>
+                <div class="menu_button menu_button_icon st_mangler_effect_export_single" title="Export this effect">
+                    <i class="fa-solid fa-download"></i>
+                </div>
                 <div class="menu_button menu_button_icon st_mangler_effect_delete" title="Delete effect">
                     <i class="fa-solid fa-trash"></i>
                 </div>
@@ -977,15 +980,25 @@ function moveEffect(settings, id, delta) {
     [settings.effects[index], settings.effects[target]] = [settings.effects[target], settings.effects[index]];
 }
 
-function exportEffects(settings) {
-    const data = { version: 1, effects: settings.effects };
+function downloadEffectsJson(effects, filename) {
+    const data = { version: 1, effects };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'message-mangler-effects.json';
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
+}
+
+function exportEffects(settings) {
+    downloadEffectsJson(settings.effects, 'message-mangler-effects.json');
+}
+
+// Slugifies the label for a readable filename, falling back to the effect id if unlabeled.
+function exportSingleEffect(effect) {
+    const slug = effect.label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    downloadEffectsJson([effect], `message-mangler-effect-${slug || effect.id}.json`);
 }
 
 // Imported effects always get fresh ids and are appended (never replace/overwrite existing
@@ -1150,6 +1163,12 @@ function addSettingsUI() {
         expandedEffectIds.add(copy.id); // opens expanded, same convention as a newly-added effect
         refreshEffectList(settings);
         context.saveSettingsDebounced();
+    });
+
+    $('#st_mangler_effects').on('click', '.st_mangler_effect_export_single', function () {
+        const id = $(this).closest('.st_mangler_effect').data('effect-id');
+        const effect = settings.effects.find(e => e.id === id);
+        if (effect) exportSingleEffect(effect);
     });
 
     $('#st_mangler_effects').on('click', '.st_mangler_effect_delete', function () {
