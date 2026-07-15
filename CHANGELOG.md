@@ -4,6 +4,12 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v17
+
+- **Fixed keyword-trigger double-counting across `Continue`** — keyword and dispel-keyword
+  matching now only scans the newly generated portion of a continued AI message, instead of
+  re-scanning (and re-incrementing on) the already-mangled earlier text every time.
+
 ## v16
 
 - **Prompt-template starter examples** — the LLM-rewrite template field now has an example

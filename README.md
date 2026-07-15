@@ -342,6 +342,10 @@ seeing one of these, this is likely why.
   manual in-place edit that happens to preserve the existing mangled prefix looks the same as a
   Continue to this check — worst case it only reprocesses the edited part instead of the whole
   message.
+- **A keyword-based progressive trigger kept climbing faster than expected across a Continue.**
+  Fixed — keyword (and dispel-keyword) matching now only scans the newly generated portion of a
+  continued message, instead of re-scanning the already-mangled earlier text and re-counting a
+  keyword hit that already applied on an earlier turn.
 
 ## How it works
 

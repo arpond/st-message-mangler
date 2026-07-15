@@ -365,10 +365,15 @@ async function runBatchedLlmDetectors(effects) {
 // over the normal escalation/read-last-known logic for this turn. Also tracks how many
 // consecutive turns the effect has stayed active, auto-dispelling once maxTurnsActive is
 // exceeded so an escalated effect doesn't just plateau forever.
-function updateAndGetEffectLevel(effect, message) {
+// detectionText is the caller's originalText, not necessarily the message's full current .mes —
+// during a Continue, applyEffects already scopes originalText down to just the newly-generated
+// suffix (see splitContinuationSuffix), so keyword/dispel matching here only ever sees new
+// content instead of re-matching (and re-incrementing on) a keyword that already hit in an
+// earlier, already-mangled portion of the same message.
+function updateAndGetEffectLevel(effect, detectionText) {
     debugLog(`updateAndGetEffectLevel "${effect.label}": detector=${effect.trigger.detector}, levelBefore=${getEffectLevel(effect).toFixed(2)}`);
 
-    if (matchesKeywordList(message.mes, effect.trigger.dispelKeywords)) {
+    if (matchesKeywordList(detectionText, effect.trigger.dispelKeywords)) {
         setEffectTurnsActive(effect, 0);
         setEffectLocked(effect, false);
         log(`Dispelled "${effect.label}" — dispel keyword matched.`);
@@ -380,7 +385,7 @@ function updateAndGetEffectLevel(effect, message) {
         level = getEffectLevel(effect); // last-known; runBatchedLlmDetectors() refreshes this in the background
         debugLog(`updateAndGetEffectLevel "${effect.label}": llm detector, reading last-known level=${level.toFixed(2)}`);
     } else {
-        const hit = matchesKeywordList(message.mes, effect.trigger.keywords);
+        const hit = matchesKeywordList(detectionText, effect.trigger.keywords);
         level = setEffectLevel(effect, getEffectLevel(effect) + (hit ? effect.trigger.incrementPerHit : -effect.trigger.decayPerTurn));
         debugLog(`updateAndGetEffectLevel "${effect.label}": keyword hit=${hit} -> level=${level.toFixed(2)}`);
     }
@@ -552,7 +557,7 @@ async function applyEffects(originalText, message, settings, source) {
         const level = effect.trigger.mode === 'always'
             ? 1
             : shouldDetectFromSource(effect, source)
-                ? updateAndGetEffectLevel(effect, message)
+                ? updateAndGetEffectLevel(effect, originalText)
                 : getEffectLevel(effect);
 
         // Awareness cue reflects the effect's true current state regardless of target — an
