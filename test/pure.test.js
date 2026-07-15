@@ -85,6 +85,28 @@ test('looksDegenerate does not flag normal prose with a short repeated dialogue 
     assert.equal(looksDegenerate(text), false);
 });
 
+test('looksDegenerate does not flag the same phrase repeated for emphasis across a spread-out passage', () => {
+    const text = 'He wants me to say it out loud, more than anything else in the world. '
+        + 'The garden was quiet under the pale moon tonight. '
+        + 'A soft breeze moved slowly through the tall trees. '
+        + 'Somewhere in the distance a dog barked twice. '
+        + 'He wants me to say it out loud, more than anything else in the world. '
+        + 'The old house creaked as the wind pushed against its walls. '
+        + 'Shadows crept quietly along the narrow hallway floor. '
+        + 'She lit a small candle just to see a little better. '
+        + 'He wants me to say it out loud, more than anything else in the world.';
+    assert.equal(looksDegenerate(text), false);
+});
+
+test('looksDegenerate still catches the same phrase repeated near-back-to-back with minor filler', () => {
+    const text = 'He wants me to say it out loud, more than anything else in the world. '
+        + 'He hesitated for just a moment. '
+        + 'He wants me to say it out loud, more than anything else in the world. '
+        + 'He hesitated for just a moment. '
+        + 'He wants me to say it out loud, more than anything else in the world.';
+    assert.equal(looksDegenerate(text), true);
+});
+
 test('escapeHtmlForDisplay escapes the five HTML-significant characters', () => {
     assert.equal(escapeHtmlForDisplay(`<b>"tom" & 'jerry'</b>`), '&lt;b&gt;&quot;tom&quot; &amp; &#39;jerry&#39;&lt;/b&gt;');
 });

@@ -4,6 +4,12 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v15
+
+- **Reduced false positives in degenerate-output detection** — the phrase-repeat check now only
+  flags repeats that occur close together (within a few sentences of each other); the same phrase
+  recurring for emphasis across a longer, otherwise-varied passage no longer trips it.
+
 ## v14
 
 - **Generate preset curves for scale steps** — the Structured steps editor now has a "Generate"
