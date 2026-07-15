@@ -99,6 +99,12 @@
     font-weight: 600;
 }
 
+.st_mangler_warning {
+    display: block;
+    margin-bottom: 0.3em;
+    color: var(--warning, #d9822b);
+}
+
 .st_mangler_changed {
     color: var(--SmartThemeQuoteColor, #e91e63);
     font-weight: 600;

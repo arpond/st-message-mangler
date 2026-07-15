@@ -945,13 +945,24 @@ async function importEffectsFromFile(file, settings) {
 // profiles configured yet — degrade to an explanatory note rather than an unusable empty dropdown.
 function renderDetectionProfileOptions(settings) {
     const profiles = context.extensionSettings.connectionManager?.profiles ?? [];
+    const savedId = settings.detectionConnectionProfileId;
+    // detectionConnectionProfileId isn't re-validated against the live profile list — a profile
+    // deleted after being selected here just fails silently via runDetectionGenerate's existing
+    // fail-open path (see comment there), with nothing in the panel to say why. Warn here instead
+    // of auto-clearing the setting, since the profile could reappear (e.g. Connection Manager
+    // still loading) and clearing would lose the user's choice for no reason.
+    const dangling = savedId && !profiles.some(p => p.id === savedId);
+    const warning = dangling
+        ? '<small class="st_mangler_warning">⚠ Saved detection profile no longer exists in Connection Manager — falling back to the main connection.</small>'
+        : '';
     if (profiles.length === 0) {
-        return '<small>No Connection Manager profiles available — detection always uses the main connection.</small>';
+        return `${warning}<small>No Connection Manager profiles available — detection always uses the main connection.</small>`;
     }
     const options = profiles.map(p =>
-        `<option value="${p.id}" ${settings.detectionConnectionProfileId === p.id ? 'selected' : ''}>${escapeHtmlForDisplay(p.name)} (${escapeHtmlForDisplay(p.api)})</option>`,
+        `<option value="${p.id}" ${savedId === p.id ? 'selected' : ''}>${escapeHtmlForDisplay(p.name)} (${escapeHtmlForDisplay(p.api)})</option>`,
     ).join('');
     return `
+        ${warning}
         <select id="st_mangler_detection_profile">
             <option value="">Use main connection (default)</option>
             ${options}
