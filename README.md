@@ -119,6 +119,20 @@ trigger/threshold logic is untouched, only what this one prompt sees is nudged j
 literal ceiling. If your model doesn't have this quirk, this cap is invisible (0.99 vs 1.00
 reads identically in practice). Example:
 
+**Scaling mode: Freeform vs. Structured steps.** By default (**Freeform**), any level-dependent
+behavior — "below 0.3 do X, 0.3-0.7 do Y, above 0.9 do Z" — has to be written as prose in the
+template itself, with the model reading `{{level}}`/`{{level_pct}}` and deciding which band
+applies. That's the same class of problem as the `0.99` cap above: it works only as well as the
+model's own numeral interpretation. **Structured steps** moves that decision out of the prompt:
+define a list of threshold + instruction-text steps in the effect's UI, and the extension picks
+the step with the highest threshold at or below the current level entirely in code, exposing the
+result as a new `{{scale_instruction}}` placeholder. The model never has to read a number and map
+it onto a range — it's just handed the one instruction that already applies. `{{level}}`/
+`{{level_pct}}` remain available in Structured steps mode too, for any part of the template that
+still wants the raw number.
+
+Example:
+
 ```
 Rewrite the message below so the speaker can't help professing their love of trees, however
 unrelated the topic, at escalation strength {{level}} (0 = no change, 1 = extreme). Preserve
@@ -270,6 +284,11 @@ A few concept pairs that sound similar but mean different things, collected in o
 - **"Dispel keywords" vs. "Max turns active"** — dispel is an explicit, immediate "the spell is
   broken" trigger you write yourself. Max turns active is passive auto-expiry after N consecutive
   active turns, with no trigger phrase needed.
+- **Freeform vs. Structured steps (llm-rewrite scaling)** — Freeform means the template's prose
+  and the model's own reading of `{{level}}`/`{{level_pct}}` decide what happens at a given
+  strength. Structured steps means *you* define the threshold/text bands and the extension picks
+  the matching one in code, handing the model only the resolved text via `{{scale_instruction}}`
+  — no numeral interpretation involved in band selection at all.
 
 ## How it works
 

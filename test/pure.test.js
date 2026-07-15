@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
     clamp01, escapeRegExp, matchesKeywordList, applyRegexEffect, applyDrunk,
     looksDegenerate, escapeHtmlForDisplay, wordDiffHighlight, backfillDefaults, resolveAwarenessCue,
+    resolveScaleStep,
 } from '../lib/pure.js';
 
 test('clamp01 clamps to [0, 1]', () => {
@@ -137,4 +138,29 @@ test('backfillDefaults resets NaN (not just non-numeric strings)', () => {
     const target = { level: NaN };
     backfillDefaults(target, { level: 0 }, () => {});
     assert.equal(target.level, 0);
+});
+
+test('resolveScaleStep returns empty string with no steps', () => {
+    assert.equal(resolveScaleStep([], 0.5), '');
+});
+
+test('resolveScaleStep returns empty string when level is below every threshold', () => {
+    const steps = [{ threshold: 0.3, text: 'low' }, { threshold: 0.7, text: 'high' }];
+    assert.equal(resolveScaleStep(steps, 0.1), '');
+});
+
+test('resolveScaleStep picks the highest threshold <= level', () => {
+    const steps = [{ threshold: 0, text: 'none' }, { threshold: 0.3, text: 'low' }, { threshold: 0.7, text: 'high' }];
+    assert.equal(resolveScaleStep(steps, 0.5), 'low');
+    assert.equal(resolveScaleStep(steps, 0.9), 'high');
+});
+
+test('resolveScaleStep treats level exactly on a threshold as a match for that step', () => {
+    const steps = [{ threshold: 0.3, text: 'low' }, { threshold: 0.7, text: 'high' }];
+    assert.equal(resolveScaleStep(steps, 0.7), 'high');
+});
+
+test('resolveScaleStep works with unsorted step input', () => {
+    const steps = [{ threshold: 0.7, text: 'high' }, { threshold: 0, text: 'none' }, { threshold: 0.3, text: 'low' }];
+    assert.equal(resolveScaleStep(steps, 0.5), 'low');
 });

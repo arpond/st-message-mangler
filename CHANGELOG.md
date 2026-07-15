@@ -4,6 +4,15 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v12
+
+- **Structured scaling steps for `llm-rewrite`** — new "Scaling" mode on LLM-rewrite effects.
+  Structured steps lets you define threshold/instruction pairs directly instead of writing
+  level-banded prose in the template; the extension picks the matching step in code and exposes
+  it as a new `{{scale_instruction}}` placeholder, so band selection no longer depends on the
+  model correctly reading a raw `{{level}}`/`{{level_pct}}` number. Freeform (the previous,
+  still-default behavior) is unchanged.
+
 ## v11
 
 - **Sanitize/validate effect fields against type corruption** — a non-numeric value in a numeric

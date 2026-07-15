@@ -10,6 +10,7 @@ import { extension_prompt_types, extension_prompt_roles } from '../../../../scri
 import {
     clamp01, escapeRegExp, matchesKeywordList, applyRegexEffect, applyDrunk,
     looksDegenerate, escapeHtmlForDisplay, wordDiffHighlight, backfillDefaults, resolveAwarenessCue,
+    resolveScaleStep,
 } from './lib/pure.js';
 
 const context = SillyTavern.getContext();
@@ -46,7 +47,11 @@ function defaultEffectShape(type = 'regex') {
         trigger: defaultTrigger(),
         regex: { pattern: '', flags: 'gi', replacement: '' },
         drunk: { intensity: 0.3 },
-        llmRewrite: { promptTemplate: '' },
+        llmRewrite: {
+            promptTemplate: '',
+            scaleMode: 'freeform', // 'freeform' | 'steps' — steps resolves {{scale_instruction}} in code instead of relying on the model to read {{level}}/{{level_pct}} and map it onto prose bands itself
+            scaleSteps: [], // [{ threshold: 0-1, text }] — used only when scaleMode === 'steps'
+        },
     };
 }
 
@@ -409,11 +414,18 @@ async function runLlmRewrite(text, effect, level, trueOriginal) {
     const trueOriginalBlock = trueOriginal === text
         ? '(same as {{original}} above — no earlier effect has changed the text yet)'
         : wrapUntrusted(trueOriginal, 'user_message_true_original');
+    // Steps mode resolves against the real (uncapped) level — this is exact code logic picking
+    // between author-written strings, not a raw number sent to the model, so the 0.99 quirk-cap
+    // above (which exists only for numerals the model itself has to read) doesn't apply here.
+    const scaleInstruction = effect.llmRewrite.scaleMode === 'steps'
+        ? resolveScaleStep(effect.llmRewrite.scaleSteps, level)
+        : '';
     const prompt = effect.llmRewrite.promptTemplate
         .replaceAll('{{original}}', wrapUntrusted(text))
         .replaceAll('{{true_original}}', trueOriginalBlock)
         .replaceAll('{{level}}', promptLevel.toFixed(2))
         .replaceAll('{{level_pct}}', String(Math.round(promptLevel * 100)))
+        .replaceAll('{{scale_instruction}}', scaleInstruction)
         + INJECTION_GUARD
         + '\n\nRespond with ONLY the rewritten message — no reasoning, no explanation, no preamble.';
     // Cap output length relative to the input as a cheap backstop against runaway/looping
@@ -765,6 +777,27 @@ function renderTriggerPanel(effect) {
         </div>`;
 }
 
+// Field paths use array indices directly (e.g. "llmRewrite.scaleSteps.0.threshold") — the
+// delegated .st_mangler_field input handler's setFieldByPath already handles this correctly
+// since string-keyed access into a JS array works like any other object key.
+function renderScaleSteps(effect) {
+    const rows = effect.llmRewrite.scaleSteps.map((step, i) => `
+        <div class="st_mangler_scale_step">
+            ${field('number', `llmRewrite.scaleSteps.${i}.threshold`, step.threshold, 'min="0" max="1" step="0.05" style="max-width: 5em;"')}
+            ${field('textarea', `llmRewrite.scaleSteps.${i}.text`, step.text, 'rows="2" placeholder="Instruction text for this threshold and above"')}
+            <div class="menu_button menu_button_icon st_mangler_scale_step_delete" data-step-index="${i}" title="Delete step">
+                <i class="fa-solid fa-trash"></i>
+            </div>
+        </div>`).join('');
+    return `
+        <div class="st_mangler_scale_steps">
+            ${rows}
+            <div class="menu_button menu_button_icon st_mangler_scale_step_add" title="Add step">
+                <i class="fa-solid fa-plus"></i> Add step
+            </div>
+        </div>`;
+}
+
 function renderTypeFields(effect) {
     switch (effect.type) {
         case 'regex':
@@ -783,8 +816,16 @@ function renderTypeFields(effect) {
             return `
                 <div class="st_mangler_type_fields">
                     <small>Calls your connected AI model to rewrite the text and waits for the reply — sending
-                    a message will pause for however long a normal generation takes.${infoIcon('Instructions for how to rewrite the message. Placeholders available: {{original}} = the message text so far (this is what gets rewritten, i.e. current pipeline state after any earlier effects); {{true_original}} = the true pre-pipeline text, before any effect ran; {{level}} = current trigger strength as a number from 0 to 1 (1 for "Always" effects); {{level_pct}} = the same strength as a whole-number percentage (0-100) instead. Some models respond more reliably to one level form than the other — the literal numeral "1" is heavily associated with "lowest"/"level one" in a lot of training data, which can make a model treat {{level}}=1.00 as weak rather than maximum; if you see that, try {{level_pct}} instead (100 doesn\'t carry the same "lowest" association). SillyTavern\'s own macros like {{user}}/{{char}} also work here.')}</small>
-                    ${field('textarea', 'llmRewrite.promptTemplate', effect.llmRewrite.promptTemplate, 'rows="5" placeholder="e.g. Rewrite {{original}} so the speaker can\'t help professing their love of trees, at strength {{level}} (0=no change, 1=extreme)."')}
+                    a message will pause for however long a normal generation takes.${infoIcon('Instructions for how to rewrite the message. Placeholders available: {{original}} = the message text so far (this is what gets rewritten, i.e. current pipeline state after any earlier effects); {{true_original}} = the true pre-pipeline text, before any effect ran; {{level}} = current trigger strength as a number from 0 to 1 (1 for "Always" effects); {{level_pct}} = the same strength as a whole-number percentage (0-100) instead; {{scale_instruction}} = (Structured steps mode only) the text of whichever step\'s threshold applies at the current level, chosen in code rather than by the model reading a number. Some models respond more reliably to one level form than the other — the literal numeral "1" is heavily associated with "lowest"/"level one" in a lot of training data, which can make a model treat {{level}}=1.00 as weak rather than maximum; if you see that, try {{level_pct}} instead (100 doesn\'t carry the same "lowest" association), or switch to Structured steps so band selection never depends on the model reading a number at all. SillyTavern\'s own macros like {{user}}/{{char}} also work here.')}</small>
+                    ${field('textarea', 'llmRewrite.promptTemplate', effect.llmRewrite.promptTemplate, 'rows="5" placeholder="e.g. Rewrite {{original}} at strength {{level}}: {{scale_instruction}}"')}
+                    <label>
+                        Scaling${infoIcon('Freeform: write level-dependent behavior as prose inside the template above, using {{level}}/{{level_pct}} directly. Structured steps: define threshold+text steps below; code picks the matching step\'s text for the current level and exposes it as {{scale_instruction}} in the template, so band selection never depends on the model reading a number.')}
+                        <select class="st_mangler_field" data-field="llmRewrite.scaleMode">
+                            <option value="freeform" ${effect.llmRewrite.scaleMode === 'freeform' ? 'selected' : ''}>Freeform ({{level}} in prompt)</option>
+                            <option value="steps" ${effect.llmRewrite.scaleMode === 'steps' ? 'selected' : ''}>Structured steps ({{scale_instruction}})</option>
+                        </select>
+                    </label>
+                    ${effect.llmRewrite.scaleMode === 'steps' ? renderScaleSteps(effect) : ''}
                 </div>`;
         default:
             return '';
@@ -805,6 +846,10 @@ function renderTestPanel(effect) {
     // touching the live extension prompt (setExtensionPrompt isn't called here).
     const cuePreview = effect.awarenessCue ? `
             <small>Awareness cue at this level: <span class="st_mangler_test_cue_val">${escapeHtmlForDisplay(resolveAwarenessCue(effect.awarenessCue, 1))}</span></small>` : '';
+    // Same reuse pattern as cuePreview above — keyed off the shared test-level slider so it can
+    // never drift from what runLlmRewrite would actually resolve for {{scale_instruction}}.
+    const scalePreview = effect.type === 'llm-rewrite' && effect.llmRewrite.scaleMode === 'steps' ? `
+            <small>Scale step at this level: <span class="st_mangler_test_scale_val">${escapeHtmlForDisplay(resolveScaleStep(effect.llmRewrite.scaleSteps, 1))}</span></small>` : '';
     return `
         <div class="st_mangler_test_panel">
             <small><b>Test</b> (runs this effect alone on the sample text below, at the level set here):</small>
@@ -812,6 +857,7 @@ function renderTestPanel(effect) {
             <textarea class="text_pole textarea_compact st_mangler_test_input" rows="2" placeholder="Sample text to test against">The knight drew his sword and charged.</textarea>
             ${levelControl}
             ${cuePreview}
+            ${scalePreview}
             <div class="menu_button menu_button_icon st_mangler_test_run"><i class="fa-solid fa-play"></i> Run test</div>
             <textarea class="text_pole textarea_compact st_mangler_test_output" rows="2" readonly placeholder="Result appears here"></textarea>
         </div>`;
@@ -1202,6 +1248,24 @@ function addSettingsUI() {
         refreshEffectList(settings);
         context.saveSettingsDebounced();
     });
+    $('#st_mangler_effects').on('click', '.st_mangler_scale_step_add', function () {
+        const id = $(this).closest('.st_mangler_effect').data('effect-id');
+        const effect = settings.effects.find(e => e.id === id);
+        if (!effect) return;
+        effect.llmRewrite.scaleSteps.push({ threshold: 0, text: '' });
+        refreshEffectList(settings);
+        context.saveSettingsDebounced();
+    });
+
+    $('#st_mangler_effects').on('click', '.st_mangler_scale_step_delete', function () {
+        const id = $(this).closest('.st_mangler_effect').data('effect-id');
+        const effect = settings.effects.find(e => e.id === id);
+        if (!effect) return;
+        effect.llmRewrite.scaleSteps.splice($(this).data('step-index'), 1);
+        refreshEffectList(settings);
+        context.saveSettingsDebounced();
+    });
+
     $('#st_mangler_effects').on('click', '.st_mangler_effect_move_up', function () {
         moveEffect(settings, $(this).closest('.st_mangler_effect').data('effect-id'), -1);
         refreshEffectList(settings);
@@ -1220,6 +1284,9 @@ function addSettingsUI() {
         const row = $(this).closest('.st_mangler_effect');
         const effect = settings.effects.find(e => e.id === row.data('effect-id'));
         if (effect) panel.find('.st_mangler_test_cue_val').text(resolveAwarenessCue(effect.awarenessCue, level));
+        if (effect && effect.type === 'llm-rewrite' && effect.llmRewrite.scaleMode === 'steps') {
+            panel.find('.st_mangler_test_scale_val').text(resolveScaleStep(effect.llmRewrite.scaleSteps, level));
+        }
     });
 
     $('#st_mangler_effects').on('click', '.st_mangler_test_run', async function () {
@@ -1254,7 +1321,7 @@ function addSettingsUI() {
 
         // Type, trigger.mode, trigger.detector, or trigger.llmIntegrationMode changes swap
         // visible sub-fields — full row re-render needed.
-        if (fieldPath === 'type' || fieldPath === 'trigger.mode' || fieldPath === 'trigger.detector' || fieldPath === 'trigger.llmIntegrationMode') {
+        if (fieldPath === 'type' || fieldPath === 'trigger.mode' || fieldPath === 'trigger.detector' || fieldPath === 'trigger.llmIntegrationMode' || fieldPath === 'llmRewrite.scaleMode') {
             refreshEffectList(settings);
         }
     });
