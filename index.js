@@ -167,6 +167,7 @@ function setEffectLevel(effect, level) {
     getChatMetadata()[effectLevelKey(effect)] = clamped;
     context.saveMetadataDebounced();
     $(`.st_mangler_effect_level_val[data-effect-id="${effect.id}"]`).text(clamped.toFixed(2));
+    refreshEffectStatusBadge(effect);
     return clamped;
 }
 
@@ -200,7 +201,26 @@ function setEffectLocked(effect, locked) {
     getChatMetadata()[effectLockedKey(effect)] = locked;
     context.saveMetadataDebounced();
     $(`.st_mangler_effect_locked_val[data-effect-id="${effect.id}"]`).text(locked ? 'yes' : 'no');
+    refreshEffectStatusBadge(effect);
     return locked;
+}
+
+// Small dot/level indicator on the collapsed effect-row header — only meaningful for
+// 'progressive' effects ('always' effects are trivially always at level 1, so no badge needed).
+// Rebuilds just this one span rather than the whole row, matching the targeted-update pattern
+// setEffectLevel/setEffectTurnsActive/setEffectLocked already use for the expanded panel's spans.
+function effectStatusBadgeHtml(effect) {
+    if (effect.trigger.mode !== 'progressive') return '';
+    const level = getEffectLevel(effect);
+    const active = level >= effect.trigger.minLevelToApply;
+    const locked = getEffectLocked(effect);
+    const icon = locked ? '\u{1F512}' : active ? '●' : '○';
+    const title = `Level ${level.toFixed(2)}${active ? ' (active)' : ''}${locked ? ' — locked' : ''}`;
+    return `<span class="st_mangler_effect_status_badge${active ? ' active' : ''}" data-effect-id="${effect.id}" title="${title}">${icon} ${level.toFixed(2)}</span>`;
+}
+
+function refreshEffectStatusBadge(effect) {
+    $(`.st_mangler_effect_status_badge[data-effect-id="${effect.id}"]`).replaceWith(effectStatusBadgeHtml(effect));
 }
 
 // Gates which hook is allowed to update an effect's level — 'user' for onMessageSent,
@@ -904,6 +924,7 @@ function renderEffectRow(effect) {
                 </div>
                 <span class="st_mangler_effect_summary_label">${escapeHtmlForDisplay(effect.label) || '<i>(unlabeled)</i>'}</span>
                 <span class="st_mangler_effect_summary_type">${EFFECT_TYPE_LABELS[effect.type] ?? effect.type}</span>
+                ${effectStatusBadgeHtml(effect)}
                 <div class="menu_button menu_button_icon st_mangler_effect_move_up" title="Move up"><i class="fa-solid fa-arrow-up"></i></div>
                 <div class="menu_button menu_button_icon st_mangler_effect_move_down" title="Move down"><i class="fa-solid fa-arrow-down"></i></div>
                 <div class="menu_button menu_button_icon st_mangler_effect_duplicate" title="Duplicate effect">

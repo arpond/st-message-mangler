@@ -86,6 +86,19 @@
     opacity: 0.7;
 }
 
+.st_mangler_effect_status_badge {
+    flex: 0 0 auto;
+    font-size: 0.8em;
+    opacity: 0.6;
+    white-space: nowrap;
+}
+
+.st_mangler_effect_status_badge.active {
+    opacity: 1;
+    color: var(--SmartThemeQuoteColor, #e91e63);
+    font-weight: 600;
+}
+
 .st_mangler_changed {
     color: var(--SmartThemeQuoteColor, #e91e63);
     font-weight: 600;
