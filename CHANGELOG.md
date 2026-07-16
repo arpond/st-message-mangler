@@ -6,6 +6,23 @@ successive rounds of development.
 
 ## v29
 
+- **Split `index.js` into focused modules** — `index.js` had grown to 1677 lines mixing settings
+  shape, per-chat state, LLM plumbing, the actual pipeline, HTML rendering, and DOM wiring in one
+  file. Split (incrementally, one commit per step, each verified against a real SillyTavern
+  install) into `lib/context.js`/`log.js`/`settings.js`/`chatState.js`/`llmClient.js`/`render.js`/
+  `pure.js`, plus top-level `pipeline.js`/`render.js`/`statusPanel.js`/`settingsUI.js`. `index.js`
+  is now ~35 lines of bootstrap wiring. No behavior changes intended; two pre-existing bugs
+  surfaced and fixed along the way (see below). `renderTriggerPanel`'s show/hide branching and the
+  detection/rating math behind `updateAndGetEffectLevel`/`applyLlmRating` are now pure and tested
+  (17 new tests, 92 total) — see `DEVELOPMENT.md`'s new Module map section.
+- **Fix floating status panel never showing on desktop** — `.draggable`'s base CSS is
+  `display: none`; only a mobile-only media query forced it visible, so it worked by accident on
+  mobile and not at all on desktop. Openers now set `display: block` explicitly, same pattern the
+  built-in Gallery extension uses.
+- **Fix stale collapsed-row level badges on chat switch** — `CHAT_CHANGED` only refreshed the
+  floating status panel, never the settings panel's own effect list, so collapsed-row level
+  badges showed whatever chat they were last rendered for until an unrelated action (e.g.
+  expanding a row) forced a re-render.
 - **Fix `maxResponseTokens` being silently overridden by input-length scaling** — `runLlmRewrite`
   previously capped `responseLength` at `Math.min(maxResponseTokens, 6x input length)`, so raising
   the per-effect "Max response length" setting had no effect unless the input was already long
