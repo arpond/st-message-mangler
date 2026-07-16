@@ -1,7 +1,7 @@
 import { loadMovingUIState } from '../../../power-user.js';
 import { dragElement } from '../../../RossAscends-mods.js';
 import { getSettings } from './lib/settings.js';
-import { effectStatusBadgeHtml } from './lib/chatState.js';
+import { effectStatusBadgeHtml, setTransformPaused } from './lib/chatState.js';
 import { escapeHtmlForDisplay } from './lib/pure.js';
 
 // ---- Floating status panel ----
@@ -72,5 +72,28 @@ export function addWandStatusButton() {
     label.textContent = 'Mangler status';
     button.append(icon, label);
     button.addEventListener('click', () => toggleStatusPanel(getSettings()));
+    container.appendChild(button);
+}
+
+// One-shot: arms a chat-scoped flag consumed by the next applyEffects call (see
+// lib/chatState.js's consumeTransformPaused), so every effect's transform is skipped for exactly
+// one upcoming message (user or character, whichever comes first) while detection/level/
+// awarenessCue tracking proceeds unaffected. No visual "armed" state in the wand menu itself —
+// just a toast, since the pause silently self-clears after the next message anyway.
+export function addWandPauseButton() {
+    const container = document.getElementById('extensionsMenu');
+    if (!(container instanceof HTMLElement)) return;
+    const button = document.createElement('div');
+    button.id = 'st_mangler_wand_pause_toggle';
+    button.classList.add('list-group-item', 'flex-container', 'flexGap5');
+    const icon = document.createElement('div');
+    icon.classList.add('fa-solid', 'fa-pause', 'extensionsMenuExtensionButton');
+    const label = document.createElement('span');
+    label.textContent = 'Mangler: pause next message';
+    button.append(icon, label);
+    button.addEventListener('click', () => {
+        setTransformPaused(true);
+        toastr.success('Message Mangler: transforms paused for the next message.');
+    });
     container.appendChild(button);
 }

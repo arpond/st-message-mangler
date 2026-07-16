@@ -6,6 +6,16 @@ successive rounds of development.
 
 ## v30
 
+- **Fix `cumulative-lock` effects staying locked forever after raising the lock threshold** —
+  a locked effect only ever unlocked via a dispel keyword; raising `lockThreshold` above the
+  effect's current level in the settings UI now unlocks it immediately if it no longer qualifies.
+- **Rename the wand-menu pause button for context** — "Pause next message" read ambiguously
+  alongside other extensions' menu items; now "Mangler: pause next message".
+- **Pause transforms for a single message** — new "Pause next message" wand-menu button and
+  `/mangler-pause` slash command skip every effect's transform for the next message only (user or
+  character, whichever comes first) — detection, levels, and awareness cues are unaffected, so a
+  progressive effect keeps escalating/decaying normally while paused. Auto-clears after that one
+  message; `/mangler-pause state=off` cancels a pending one early.
 - **Fix macros not substituted when a detection connection profile is set** — SillyTavern macros
   (`{{user}}`, `{{char}}`, etc.) already worked in detection conditions via the main connection,
   but `ConnectionManagerRequestService` (used when **Detection connection** is set to a

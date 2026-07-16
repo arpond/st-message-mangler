@@ -4,6 +4,7 @@ import { log, warn } from './lib/log.js';
 import { getSettings, debugLog } from './lib/settings.js';
 import {
     getEffectLevel, setEffectLevel, getEffectTurnsActive, setEffectTurnsActive, getEffectLocked, setEffectLocked,
+    consumeTransformPaused,
 } from './lib/chatState.js';
 import { runBatchedLlmDetectors, runLlmRewrite } from './lib/llmClient.js';
 import {
@@ -114,7 +115,12 @@ function updateAwarenessCue(effect, level, active, trend = 'steady') {
 // increments (and waste a call for absolute mode, which just overwrites anyway).
 export async function applyEffects(originalText, message, settings, source, isContinuation = false, respondingTo = '', recentMessages = []) {
     const budget = { remaining: settings.maxLlmCallsPerMessage };
-    debugLog(`applyEffects: starting for source=${source}, ${settings.effects.length} effect(s) configured, LLM call budget=${budget.remaining}`);
+    // Consumed once per call (not per effect) so a "pause next message" request applies uniformly
+    // to whichever hook processes next, regardless of how many effects are configured — detection/
+    // level/awarenessCue tracking below is completely unaffected, only the transform dispatch is
+    // skipped.
+    const transformPaused = consumeTransformPaused();
+    debugLog(`applyEffects: starting for source=${source}, ${settings.effects.length} effect(s) configured, LLM call budget=${budget.remaining}${transformPaused ? ', transforms paused for this message' : ''}`);
 
     const dueLlmDetectors = settings.effects.filter(e => e.enabled && e.trigger.mode === 'progressive'
         && e.trigger.detector === 'llm' && shouldDetectFromSource(e, source)
@@ -181,6 +187,10 @@ export async function applyEffects(originalText, message, settings, source, isCo
 
         if (!effectAppliesToTarget(effect, source)) {
             debugLog(`applyEffects: "${effect.label}" — detection updated, but target=${effect.target} excludes ${source}; no transform.`);
+            continue;
+        }
+        if (transformPaused) {
+            debugLog(`applyEffects: "${effect.label}" — detection updated, but transforms are paused for this message.`);
             continue;
         }
         if (level < effect.trigger.minLevelToApply) {

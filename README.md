@@ -93,6 +93,21 @@ persists across reloads via SillyTavern's Moving UI); close it with the ✕ or e
 button. The panel starts closed on each page load. Effects with an `always` trigger aren't
 listed — they're trivially active at level 1, so there's nothing to watch.
 
+### Pausing transforms for one message
+
+Click **Pause next message** in the wand/extensions menu, or run `/mangler-pause`, to skip every
+effect's transform for the next message only (user or character, whichever comes first) — the
+message goes through completely unmangled. Detection, levels, and awareness cues are unaffected;
+this only suppresses the transform, so a progressive effect keeps escalating/decaying normally
+even while paused. It auto-clears after that one message — run `/mangler-pause state=off` to
+cancel a pending pause without waiting for it to consume itself.
+
+### Slash commands
+
+- `/mangler-toggle <effect label> [state=on|off]` — enable/disable an effect by label without
+  opening the settings panel. Omitting `state` toggles the current value.
+- `/mangler-pause [state=on|off]` — see above.
+
 ### Debug logging
 
 There's a `debug` setting with no UI control — enable it from the browser console when you need

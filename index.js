@@ -15,12 +15,13 @@ import { log } from './lib/log.js';
 import { getSettings } from './lib/settings.js';
 import { resetLevelsOnFreshFork } from './lib/chatState.js';
 import { onMessageSent, onCharacterMessageRendered, clearAllAwarenessCues } from './pipeline.js';
-import { addWandStatusButton } from './statusPanel.js';
+import { addWandStatusButton, addWandPauseButton } from './statusPanel.js';
 import { addSettingsUI, registerSlashCommands, refreshEffectList, refreshDetectionProfileDropdown } from './settingsUI.js';
 
 getSettings();
 addSettingsUI();
 addWandStatusButton();
+addWandPauseButton();
 registerSlashCommands();
 context.eventSource.on(context.eventTypes.MESSAGE_SENT, onMessageSent);
 context.eventSource.on(context.eventTypes.CHARACTER_MESSAGE_RENDERED, onCharacterMessageRendered);

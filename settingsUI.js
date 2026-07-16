@@ -2,7 +2,7 @@ import { extension_prompt_types } from '../../../../script.js';
 import { context } from './lib/context.js';
 import { log, warn } from './lib/log.js';
 import { getSettings } from './lib/settings.js';
-import { setEffectLevel, setEffectTurnsActive, setEffectLocked } from './lib/chatState.js';
+import { getEffectLevel, getEffectLocked, setEffectLevel, setEffectTurnsActive, setEffectLocked, setTransformPaused } from './lib/chatState.js';
 import { runDetectionTest } from './lib/llmClient.js';
 import {
     escapeHtmlForDisplay, resolveAwarenessCue, backfillDefaults,
@@ -183,6 +183,45 @@ export function registerSlashCommands() {
                 <ul>
                     <li><pre><code class="language-stscript">/mangler-toggle Drunk mode</code></pre></li>
                     <li><pre><code class="language-stscript">/mangler-toggle state=off Drunk mode</code></pre></li>
+                </ul>
+            </div>
+        `,
+    }));
+
+    context.SlashCommandParser.addCommandObject(context.SlashCommand.fromProps({
+        name: 'mangler-pause',
+        callback: (args) => {
+            const state = args?.state;
+            const paused = state === 'off' ? false : true;
+            setTransformPaused(paused);
+            const message = paused
+                ? 'Message Mangler: transforms paused for the next message.'
+                : 'Message Mangler: pending pause cancelled.';
+            toastr.success(message);
+            log(message);
+            return paused ? 'on' : 'off';
+        },
+        returns: 'the new pause state ("on" or "off")',
+        namedArgumentList: [
+            context.SlashCommandNamedArgument.fromProps({
+                name: 'state',
+                description: 'Explicitly set the state (\'on\' to arm the pause, \'off\' to cancel a pending one). If omitted, arms the pause.',
+                typeList: [context.ARGUMENT_TYPE.STRING],
+                enumList: [
+                    new context.SlashCommandEnumValue('on'),
+                    new context.SlashCommandEnumValue('off'),
+                ],
+            }),
+        ],
+        helpString: `
+            <div>Skips every effect's transform for the next message only (user or character,
+            whichever comes first) — detection/level/awareness-cue tracking is unaffected, and the
+            pause auto-clears after that one message.</div>
+            <div>
+                <strong>Example:</strong>
+                <ul>
+                    <li><pre><code class="language-stscript">/mangler-pause</code></pre></li>
+                    <li><pre><code class="language-stscript">/mangler-pause state=off</code></pre></li>
                 </ul>
             </div>
         `,
@@ -468,6 +507,16 @@ export function addSettingsUI() {
         const value = isCheckbox ? !!$(this).prop('checked') : isRange ? Number($(this).val()) : $(this).val();
         setFieldByPath(effect, fieldPath, value);
         context.saveSettingsDebounced();
+
+        // Raising lockThreshold above the current (already-locked) level should unlock the
+        // effect immediately — otherwise a locked effect stays permanently locked even once
+        // its level no longer qualifies under the new, higher threshold, until a dispel keyword
+        // happens to fire. Only ever unlocks here (never locks) — locking is still exclusively
+        // applyLlmRating's job when level actually crosses the threshold via a real rating.
+        if (fieldPath === 'trigger.lockThreshold' && getEffectLocked(effect) && getEffectLevel(effect) < effect.trigger.lockThreshold) {
+            setEffectLocked(effect, false);
+            log(`"${effect.label}" unlocked — lock threshold raised above its current level.`);
+        }
 
         // Type, trigger.mode, trigger.detector, or trigger.llmIntegrationMode changes swap
         // visible sub-fields — full row re-render needed.
