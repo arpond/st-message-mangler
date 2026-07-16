@@ -7,6 +7,7 @@ import {
     resolveScaleStep, splitContinuationSuffix, generateScaleSteps, sanitizeScaleSteps,
     buildRespondingToContext, buildSceneContext,
     defaultTrigger, defaultEffectShape, defaultEffect, DEFAULT_SETTINGS, migrateLegacySettings,
+    wrapUntrusted, INJECTION_GUARD, withTimeout, extractRating, resolveLlmRatingUpdate,
 } from '../lib/pure.js';
 
 test('clamp01 clamps to [0, 1]', () => {
@@ -434,4 +435,57 @@ test('buildSceneContext takes only the last N messages when lookback is smaller 
 test('buildSceneContext uses the whole list when lookback exceeds its length', () => {
     const messages = [{ name: 'Aria', mes: 'One.' }, { name: 'User', mes: 'Two.' }];
     assert.equal(buildSceneContext(messages, 10), 'Aria: One.\nUser: Two.');
+});
+
+test('wrapUntrusted wraps text in the given tag, defaulting to user_message', () => {
+    assert.equal(wrapUntrusted('hi'), '<user_message>\nhi\n</user_message>');
+    assert.equal(wrapUntrusted('hi', 'scene_context'), '<scene_context>\nhi\n</scene_context>');
+});
+
+test('INJECTION_GUARD mentions the untrusted-content tags', () => {
+    assert.match(INJECTION_GUARD, /user_message/);
+});
+
+test('withTimeout resolves normally when the promise settles first', async () => {
+    const result = await withTimeout(Promise.resolve('ok'), 1000, 'test');
+    assert.equal(result, 'ok');
+});
+
+test('withTimeout rejects once the timeout elapses first', async () => {
+    const neverResolves = new Promise(() => {});
+    await assert.rejects(() => withTimeout(neverResolves, 10, 'slow op'), /slow op timed out after 10ms/);
+});
+
+test('extractRating finds the nearest number after a label in various formats', () => {
+    assert.equal(extractRating('effect_abc123: 7', 'effect_abc123'), 7);
+    assert.equal(extractRating('**effect_abc123**: 7', 'effect_abc123'), 7);
+    assert.equal(extractRating('effect_abc123 is rated 8 out of 10', 'effect_abc123'), 8);
+    assert.equal(extractRating('rating: 4/10', 'rating'), 4);
+});
+
+test('extractRating clamps an out-of-range value to [0, 10] and returns null when the label is missing', () => {
+    assert.equal(extractRating('rating: 99', 'rating'), 10);
+    assert.equal(extractRating('no label here', 'rating'), null);
+});
+
+test('resolveLlmRatingUpdate: absolute mode sets level directly from the rating', () => {
+    const trigger = { ...defaultTrigger(), llmIntegrationMode: 'absolute' };
+    assert.deepEqual(resolveLlmRatingUpdate(0.2, false, 7, trigger), { level: 0.7, locked: false });
+});
+
+test('resolveLlmRatingUpdate: cumulative mode increments on a hit, decays otherwise', () => {
+    const trigger = { ...defaultTrigger(), llmIntegrationMode: 'cumulative', llmHitThreshold: 5, incrementPerHit: 0.3, decayPerTurn: 0.05 };
+    assert.deepEqual(resolveLlmRatingUpdate(0.2, false, 7, trigger), { level: 0.5, locked: false });
+    assert.deepEqual(resolveLlmRatingUpdate(0.2, false, 2, trigger), { level: 0.2 - 0.05, locked: false });
+});
+
+test('resolveLlmRatingUpdate: cumulative-lock locks once level crosses lockThreshold', () => {
+    const trigger = {
+        ...defaultTrigger(), llmIntegrationMode: 'cumulative-lock',
+        llmHitThreshold: 5, incrementPerHit: 0.3, decayPerTurn: 0.05, lockThreshold: 0.8,
+    };
+    assert.deepEqual(resolveLlmRatingUpdate(0.6, false, 7, trigger), { level: 0.6 + 0.3, locked: true });
+    // Already-locked stays locked even on a non-hit (caller is expected to skip calling this
+    // at all once locked, per the doc comment — this just verifies the math doesn't un-lock).
+    assert.deepEqual(resolveLlmRatingUpdate(0.9, true, 1, trigger), { level: 0.85, locked: true });
 });
