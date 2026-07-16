@@ -11,126 +11,14 @@ import { loadMovingUIState } from '../../../power-user.js';
 import { dragElement } from '../../../RossAscends-mods.js';
 import { context, MODULE_NAME } from './lib/context.js';
 import { log, warn } from './lib/log.js';
+import { getSettings, debugLog } from './lib/settings.js';
 import {
     clamp01, escapeRegExp, matchesKeywordList, applyRegexEffect, applyDrunk,
     looksDegenerate, escapeHtmlForDisplay, wordDiffHighlight, backfillDefaults, resolveAwarenessCue,
     resolveLevelTrend,
     resolveScaleStep, splitContinuationSuffix, generateScaleSteps, sanitizeScaleSteps,
-    buildRespondingToContext, buildSceneContext,
+    buildRespondingToContext, buildSceneContext, defaultEffectShape, defaultEffect,
 } from './lib/pure.js';
-
-function defaultTrigger() {
-    return {
-        mode: 'always', // 'always' | 'progressive'
-        detector: 'keyword', // 'keyword' | 'llm'
-        detectSource: 'both', // 'both' | 'user' | 'character' — which speaker's messages are allowed to update the level
-        keywords: '', // used only when detector === 'keyword'
-        llmCondition: '', // used only when detector === 'llm' — the condition description sent to the classifier
-        incrementPerHit: 0.3,
-        decayPerTurn: 0.05,
-        llmLookback: 6,
-        llmIntegrationMode: 'absolute', // 'absolute' | 'cumulative' | 'cumulative-lock' — only relevant when detector === 'llm'
-        llmHitThreshold: 5, // 0-10; rating >= this counts as a "hit" for cumulative/cumulative-lock modes
-        lockThreshold: 0.8, // 0-1; cumulative-lock only — level >= this permanently stops decay until dispelled
-        minLevelToApply: 0.05,
-        dispelKeywords: '', // comma list; a hit forces level to 0, checked regardless of detector
-        maxTurnsActive: 0, // 0 = never auto-expire; otherwise force-dispel after this many consecutive active turns
-    };
-}
-
-// Shape only, no id — used for backfilling defaults onto existing effects, where minting a
-// fresh id every call would be immediately discarded (the effect's real id always wins).
-function defaultEffectShape(type = 'regex') {
-    return {
-        label: '',
-        enabled: true,
-        type,
-        target: 'user', // 'user' | 'character' | 'both' — which speaker's message the transform is applied to
-        awarenessCue: '', // optional; injected into the prompt via setExtensionPrompt only while this effect is active
-        promptLevelCap: 0.99, // caps {{level}}/{{level_pct}} substitution in both the llm-rewrite template and awarenessCue — routes around a local-model quirk where the literal maximum reads as "weak"; set to 1 to disable if the connected model doesn't have this quirk
-        trigger: defaultTrigger(),
-        regex: { pattern: '', flags: 'gi', replacement: '' },
-        drunk: { intensity: 0.3 },
-        llmRewrite: {
-            promptTemplate: '',
-            scaleMode: 'freeform', // 'freeform' | 'steps' — steps resolves {{scale_instruction}} in code instead of relying on the model to read {{level}}/{{level_pct}} and map it onto prose bands itself
-            scaleSteps: [], // [{ threshold: 0-1, text }] — used only when scaleMode === 'steps'
-            sceneLookback: 4, // how many recent chat messages to expose as {{scene}} — 0 disables it
-            maxResponseTokens: 600, // ceiling on runLlmRewrite's response-length budget — was a fixed 600 for every effect; a rewrite that expands/elaborates on a long input could get cut off mid-sentence at that ceiling
-        },
-    };
-}
-
-function defaultEffect(type = 'regex') {
-    return {
-        id: `effect_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-        ...defaultEffectShape(type),
-    };
-}
-
-const DEFAULT_SETTINGS = {
-    enabled: true,
-    showOriginal: false,
-    highlightChanges: false,
-    maxLlmCallsPerMessage: 3,
-    generateTimeoutMs: 60000, // per-attempt timeout for any LLM call (detector or rewrite); see generateRawWithRetry
-    detectionConnectionProfileId: '', // '' = use the main connection (default). See runDetectionGenerate.
-    debug: false, // no UI control on purpose — toggle from the browser console:
-    // const ctx = SillyTavern.getContext(); ctx.extensionSettings.st_message_mangler.debug = true; ctx.saveSettingsDebounced();
-    effects: [],
-};
-
-// Hidden debug flag — no UI control (see DEFAULT_SETTINGS.debug). Verbose enough to trace a
-// single message's path through detection/trigger/transform without needing to re-read the code.
-function debugLog(...args) {
-    if (getSettings().debug) log('[debug]', ...args);
-}
-
-// One-time migration: v1/v2 stored a flat `rules[]` (regex) + a single hardcoded `drunkMode`
-// object. v3 unifies both into `effects[]`. Runs once — after it runs, `effects` exists and
-// the legacy keys are removed, so it's a no-op on subsequent loads.
-function migrateLegacySettings(settings) {
-    if (Array.isArray(settings.effects)) return;
-    settings.effects = [];
-
-    for (const rule of settings.rules ?? []) {
-        const effect = defaultEffect('regex');
-        effect.label = rule.label || 'Migrated rule';
-        effect.enabled = rule.enabled ?? true;
-        effect.regex = { pattern: rule.pattern ?? '', flags: rule.flags ?? 'gi', replacement: rule.replacement ?? '' };
-        effect.trigger.mode = 'always';
-        settings.effects.push(effect);
-    }
-
-    if (settings.drunkMode) {
-        const effect = defaultEffect('drunk');
-        effect.label = 'Drunk mode';
-        effect.enabled = settings.drunkMode.enabled ?? false;
-        effect.drunk.intensity = settings.drunkMode.intensity ?? 0.3;
-        if (settings.drunkMode.progression) {
-            Object.assign(effect.trigger, settings.drunkMode.progression);
-        }
-        settings.effects.push(effect);
-    }
-
-    delete settings.rules;
-    delete settings.drunkMode;
-    log(`Migrated legacy settings into ${settings.effects.length} effect(s).`);
-}
-
-function getSettings() {
-    if (!context.extensionSettings[MODULE_NAME]) {
-        context.extensionSettings[MODULE_NAME] = structuredClone(DEFAULT_SETTINGS);
-    }
-    const settings = context.extensionSettings[MODULE_NAME];
-    migrateLegacySettings(settings);
-    backfillDefaults(settings, DEFAULT_SETTINGS, warn);
-    for (const effect of settings.effects) {
-        backfillDefaults(effect, defaultEffectShape(effect.type), warn);
-        sanitizeScaleSteps(effect.llmRewrite.scaleSteps, warn);
-    }
-    return settings;
-}
 
 // `context.chatMetadata` is a snapshot taken when SillyTavern.getContext() was called (module
 // load time) — script.js *reassigns* its chat_metadata variable on every chat switch/new chat
@@ -1199,6 +1087,11 @@ function openStatusPanel(settings) {
             <div class="st_mangler_status_panel_body">${renderStatusPanelRows(settings)}</div>
         </div>`;
     $('#movingDivs').append(html);
+    // .draggable's base CSS is display:none — desktop relies on the opener to reveal it
+    // explicitly (same pattern the built-in Gallery extension uses); only a mobile-only media
+    // query forces it visible unconditionally, which is why this worked on mobile but not
+    // desktop before this fix.
+    $('#st_mangler_status_panel').css('display', 'block');
     loadMovingUIState();
     dragElement($('#st_mangler_status_panel'));
     $('#st_mangler_status_panel_close').on('click', closeStatusPanel);

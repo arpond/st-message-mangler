@@ -6,12 +6,70 @@ import {
     resolveLevelTrend,
     resolveScaleStep, splitContinuationSuffix, generateScaleSteps, sanitizeScaleSteps,
     buildRespondingToContext, buildSceneContext,
+    defaultTrigger, defaultEffectShape, defaultEffect, DEFAULT_SETTINGS, migrateLegacySettings,
 } from '../lib/pure.js';
 
 test('clamp01 clamps to [0, 1]', () => {
     assert.equal(clamp01(-0.5), 0);
     assert.equal(clamp01(0.5), 0.5);
     assert.equal(clamp01(1.5), 1);
+});
+
+test('defaultTrigger returns the always/keyword baseline shape', () => {
+    const trigger = defaultTrigger();
+    assert.equal(trigger.mode, 'always');
+    assert.equal(trigger.detector, 'keyword');
+    assert.equal(trigger.detectSource, 'both');
+});
+
+test('defaultEffectShape embeds a fresh defaultTrigger and type-specific fields', () => {
+    const shape = defaultEffectShape('drunk');
+    assert.equal(shape.type, 'drunk');
+    assert.equal(shape.trigger.mode, 'always');
+    assert.equal(shape.drunk.intensity, 0.3);
+    assert.equal(shape.llmRewrite.scaleMode, 'freeform');
+});
+
+test('defaultEffect adds a unique id on top of defaultEffectShape', () => {
+    const a = defaultEffect('regex');
+    const b = defaultEffect('regex');
+    assert.match(a.id, /^effect_/);
+    assert.notEqual(a.id, b.id);
+    assert.equal(a.type, 'regex');
+});
+
+test('migrateLegacySettings is a no-op once effects[] already exists', () => {
+    const settings = { effects: [{ id: 'x' }] };
+    migrateLegacySettings(settings);
+    assert.equal(settings.effects.length, 1);
+    assert.equal(settings.effects[0].id, 'x');
+});
+
+test('migrateLegacySettings converts legacy rules[] into regex effects', () => {
+    const settings = { rules: [{ label: 'swap', enabled: true, pattern: 'a', flags: 'gi', replacement: 'b' }] };
+    const logs = [];
+    migrateLegacySettings(settings, (...args) => logs.push(args));
+    assert.equal(settings.effects.length, 1);
+    assert.equal(settings.effects[0].type, 'regex');
+    assert.equal(settings.effects[0].label, 'swap');
+    assert.equal(settings.effects[0].regex.pattern, 'a');
+    assert.equal(settings.rules, undefined);
+    assert.equal(logs.length, 1);
+});
+
+test('migrateLegacySettings converts legacy drunkMode into a drunk effect', () => {
+    const settings = { drunkMode: { enabled: true, intensity: 0.7, progression: { mode: 'progressive' } } };
+    migrateLegacySettings(settings);
+    assert.equal(settings.effects.length, 1);
+    assert.equal(settings.effects[0].type, 'drunk');
+    assert.equal(settings.effects[0].drunk.intensity, 0.7);
+    assert.equal(settings.effects[0].trigger.mode, 'progressive');
+    assert.equal(settings.drunkMode, undefined);
+});
+
+test('DEFAULT_SETTINGS starts with no effects and debug off', () => {
+    assert.deepEqual(DEFAULT_SETTINGS.effects, []);
+    assert.equal(DEFAULT_SETTINGS.debug, false);
 });
 
 test('matchesKeywordList matches whole words, case-insensitively', () => {
