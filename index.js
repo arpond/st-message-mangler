@@ -1217,6 +1217,25 @@ function toggleStatusPanel(settings) {
     else openStatusPanel(settings);
 }
 
+// The settings-panel "Status panel" button (addSettingsUI) requires opening the extensions
+// drawer and scrolling to find — easy to miss, especially on mobile. This mirrors the standard
+// ST extension pattern (see e.g. the Gallery extension's wand button) for a one-tap toggle
+// that's always reachable from the wand/extensions menu next to the chat input.
+function addWandStatusButton() {
+    const container = document.getElementById('extensionsMenu');
+    if (!(container instanceof HTMLElement)) return;
+    const button = document.createElement('div');
+    button.id = 'st_mangler_wand_status_toggle';
+    button.classList.add('list-group-item', 'flex-container', 'flexGap5');
+    const icon = document.createElement('div');
+    icon.classList.add('fa-solid', 'fa-gauge-high', 'extensionsMenuExtensionButton');
+    const label = document.createElement('span');
+    label.textContent = 'Mangler status';
+    button.append(icon, label);
+    button.addEventListener('click', () => toggleStatusPanel(getSettings()));
+    container.appendChild(button);
+}
+
 // Imported effects always get fresh ids and are appended (never replace/overwrite existing
 // effects), so importing is always a safe, additive action — reorder/delete afterward as needed.
 async function importEffectsFromFile(file, settings) {
@@ -1643,6 +1662,7 @@ function addSettingsUI() {
 
 getSettings();
 addSettingsUI();
+addWandStatusButton();
 registerSlashCommands();
 context.eventSource.on(context.eventTypes.MESSAGE_SENT, onMessageSent);
 context.eventSource.on(context.eventTypes.CHARACTER_MESSAGE_RENDERED, onCharacterMessageRendered);

@@ -6,6 +6,10 @@ successive rounds of development.
 
 ## v29
 
+- **Status panel reachable from the wand/extensions menu** — a new "Mangler status" entry next
+  to the chat input toggles the same floating status panel as the settings-panel button, without
+  needing to open Extensions and scroll to find it. Fixes findability on mobile, where the
+  settings-panel button was easy to miss.
 - **Guard against catastrophic backtracking in regex effects** — a user-authored `regex` effect
   pattern that looks like a classic ReDoS shape (nested quantifiers, overlapping quantified
   alternation — e.g. `(a+)+`, `(a|ab)+`) is now refused before it ever reaches `new RegExp`,

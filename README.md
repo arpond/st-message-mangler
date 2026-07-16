@@ -81,13 +81,15 @@ Open the **Message Mangler** drawer in the Extensions settings panel.
 
 ### Floating status panel
 
-Click **Status panel** (next to Collapse all) to open a small draggable overlay listing every
-enabled progressive effect with its live level and lock state — the same 🔒/●/○ + level badge the
-collapsed effect rows show, updating in real time as messages are processed, without needing the
-Extensions drawer open mid-scene. Drag it anywhere (position persists across reloads via
-SillyTavern's Moving UI); close it with the ✕ or the same toolbar button. The panel starts closed
-on each page load. Effects with an `always` trigger aren't listed — they're trivially active at
-level 1, so there's nothing to watch.
+Click **Status panel** (next to Collapse all in the extension's settings), or **Mangler status**
+in the wand/extensions menu next to the chat input, to open a small draggable overlay listing
+every enabled progressive effect with its live level and lock state — the same 🔒/●/○ + level
+badge the collapsed effect rows show, updating in real time as messages are processed, without
+needing the Extensions drawer open mid-scene. The wand-menu entry is the easier way to reach it
+on mobile, where scrolling to the settings-panel button is awkward. Drag it anywhere (position
+persists across reloads via SillyTavern's Moving UI); close it with the ✕ or either toolbar
+button. The panel starts closed on each page load. Effects with an `always` trigger aren't
+listed — they're trivially active at level 1, so there's nothing to watch.
 
 ### Debug logging
 
