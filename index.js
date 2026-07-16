@@ -10,6 +10,7 @@ import { extension_prompt_types, extension_prompt_roles } from '../../../../scri
 import { loadMovingUIState } from '../../../power-user.js';
 import { dragElement } from '../../../RossAscends-mods.js';
 import { context, MODULE_NAME } from './lib/context.js';
+import { log, warn } from './lib/log.js';
 import {
     clamp01, escapeRegExp, matchesKeywordList, applyRegexEffect, applyDrunk,
     looksDegenerate, escapeHtmlForDisplay, wordDiffHighlight, backfillDefaults, resolveAwarenessCue,
@@ -78,10 +79,6 @@ const DEFAULT_SETTINGS = {
     // const ctx = SillyTavern.getContext(); ctx.extensionSettings.st_message_mangler.debug = true; ctx.saveSettingsDebounced();
     effects: [],
 };
-
-const LOG_PREFIX = '[message-mangler]';
-const log = (...args) => console.log(LOG_PREFIX, ...args);
-const warn = (...args) => console.warn(LOG_PREFIX, ...args);
 
 // Hidden debug flag — no UI control (see DEFAULT_SETTINGS.debug). Verbose enough to trace a
 // single message's path through detection/trigger/transform without needing to re-read the code.
