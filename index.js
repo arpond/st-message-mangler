@@ -9,96 +9,21 @@ import { removeReasoningFromString } from '../../../reasoning.js';
 import { extension_prompt_types, extension_prompt_roles } from '../../../../script.js';
 import { loadMovingUIState } from '../../../power-user.js';
 import { dragElement } from '../../../RossAscends-mods.js';
-import { context, MODULE_NAME } from './lib/context.js';
+import { context } from './lib/context.js';
 import { log, warn } from './lib/log.js';
 import { getSettings, debugLog } from './lib/settings.js';
 import {
-    clamp01, escapeRegExp, matchesKeywordList, applyRegexEffect, applyDrunk,
+    getChatMetadata, getEffectLevel, setEffectLevel, getEffectTurnsActive, setEffectTurnsActive,
+    getEffectLocked, setEffectLocked, effectStatusBadgeHtml, refreshEffectStatusBadge, resetLevelsOnFreshFork,
+} from './lib/chatState.js';
+import {
+    escapeRegExp, matchesKeywordList, applyRegexEffect, applyDrunk,
     looksDegenerate, escapeHtmlForDisplay, wordDiffHighlight, backfillDefaults, resolveAwarenessCue,
     resolveLevelTrend,
     resolveScaleStep, splitContinuationSuffix, generateScaleSteps, sanitizeScaleSteps,
     buildRespondingToContext, buildSceneContext, defaultEffectShape, defaultEffect,
 } from './lib/pure.js';
 
-// `context.chatMetadata` is a snapshot taken when SillyTavern.getContext() was called (module
-// load time) — script.js *reassigns* its chat_metadata variable on every chat switch/new chat
-// (`chat_metadata = {}`), so the cached reference goes stale the moment you leave the chat that
-// was open when the extension loaded. Re-fetching context here (cheap) always gets the metadata
-// object for whichever chat is actually active right now. (`context.chat` doesn't need this —
-// script.js only ever mutates that array in place, never reassigns it.)
-function getChatMetadata() {
-    return SillyTavern.getContext().chatMetadata;
-}
-
-function effectLevelKey(effect) {
-    return `st_mangler_effect_level_${effect.id}`;
-}
-
-function getEffectLevel(effect) {
-    return clamp01(Number(getChatMetadata()[effectLevelKey(effect)] ?? 0));
-}
-
-// Returns the clamped value it wrote, so callers don't need a separate read to get it back.
-function setEffectLevel(effect, level) {
-    const clamped = clamp01(level);
-    getChatMetadata()[effectLevelKey(effect)] = clamped;
-    context.saveMetadataDebounced();
-    $(`.st_mangler_effect_level_val[data-effect-id="${effect.id}"]`).text(clamped.toFixed(2));
-    refreshEffectStatusBadge(effect);
-    return clamped;
-}
-
-function effectTurnsKey(effect) {
-    return `st_mangler_effect_turns_${effect.id}`;
-}
-
-function getEffectTurnsActive(effect) {
-    return Math.max(0, Number(getChatMetadata()[effectTurnsKey(effect)] ?? 0));
-}
-
-function setEffectTurnsActive(effect, turns) {
-    const clamped = Math.max(0, turns);
-    getChatMetadata()[effectTurnsKey(effect)] = clamped;
-    context.saveMetadataDebounced();
-    $(`.st_mangler_effect_turns_val[data-effect-id="${effect.id}"]`).text(clamped);
-    return clamped;
-}
-
-function effectLockedKey(effect) {
-    return `st_mangler_effect_locked_${effect.id}`;
-}
-
-function getEffectLocked(effect) {
-    return !!getChatMetadata()[effectLockedKey(effect)];
-}
-
-// cumulative-lock only: once locked, an effect's level stops responding to new LLM ratings
-// entirely (no more increment or decay) until a dispel keyword clears it.
-function setEffectLocked(effect, locked) {
-    getChatMetadata()[effectLockedKey(effect)] = locked;
-    context.saveMetadataDebounced();
-    $(`.st_mangler_effect_locked_val[data-effect-id="${effect.id}"]`).text(locked ? 'yes' : 'no');
-    refreshEffectStatusBadge(effect);
-    return locked;
-}
-
-// Small dot/level indicator on the collapsed effect-row header — only meaningful for
-// 'progressive' effects ('always' effects are trivially always at level 1, so no badge needed).
-// Rebuilds just this one span rather than the whole row, matching the targeted-update pattern
-// setEffectLevel/setEffectTurnsActive/setEffectLocked already use for the expanded panel's spans.
-function effectStatusBadgeHtml(effect) {
-    if (effect.trigger.mode !== 'progressive') return '';
-    const level = getEffectLevel(effect);
-    const active = level >= effect.trigger.minLevelToApply;
-    const locked = getEffectLocked(effect);
-    const icon = locked ? '\u{1F512}' : active ? '●' : '○';
-    const title = `Level ${level.toFixed(2)}${active ? ' (active)' : ''}${locked ? ' — locked' : ''}`;
-    return `<span class="st_mangler_effect_status_badge${active ? ' active' : ''}" data-effect-id="${effect.id}" title="${title}">${icon} ${level.toFixed(2)}</span>`;
-}
-
-function refreshEffectStatusBadge(effect) {
-    $(`.st_mangler_effect_status_badge[data-effect-id="${effect.id}"]`).replaceWith(effectStatusBadgeHtml(effect));
-}
 
 // Gates which hook is allowed to update an effect's level — 'user' for onMessageSent,
 // 'character' for onCharacterMessageRendered. Applies to both detector types identically;
@@ -420,28 +345,6 @@ function clearAllAwarenessCues(settings) {
     for (const effect of settings.effects) {
         context.setExtensionPrompt(awarenessCueKey(effect), '', extension_prompt_types.IN_CHAT, 0);
     }
-}
-
-// SillyTavern's fork/branch feature (createBranch/saveChat in core) merges the ORIGINAL chat's
-// full chat_metadata into the new branch's — including our per-effect level/turns/locked state,
-// which reflects wherever the original chat's levels happened to be at the moment of forking, not
-// at the message the fork actually started from (chat_metadata has no per-message history the
-// way messages themselves do — a fork from message #2 of a 50-message scene could otherwise
-// arrive already locked at level 1.0 from something that only happened at message #40). Detected
-// via chat_metadata.main_chat (set only on forked/branch chats) plus our own one-time marker, so
-// this only fires once per freshly-forked chat — never on a normal switch back into a branch
-// that's already been reset.
-function resetLevelsOnFreshFork(settings) {
-    const metadata = getChatMetadata();
-    if (!metadata.main_chat || metadata.st_mangler_fork_reset_done) return;
-    for (const effect of settings.effects) {
-        setEffectLevel(effect, 0);
-        setEffectTurnsActive(effect, 0);
-        setEffectLocked(effect, false);
-    }
-    metadata.st_mangler_fork_reset_done = true;
-    context.saveMetadataDebounced();
-    log('Forked/branched chat detected — reset all effect levels (inherited chat_metadata reflected the source chat\'s current state, not the fork point).');
 }
 
 // Injects a short live cue into the prompt (via setExtensionPrompt, same mechanism the
@@ -1559,7 +1462,11 @@ context.eventSource.on(context.eventTypes.CHAT_CHANGED, () => {
     const settings = getSettings();
     clearAllAwarenessCues(settings);
     resetLevelsOnFreshFork(settings);
-    refreshStatusPanelContents(settings); // levels are per-chat; re-read for the new chat
+    // Levels/turns/locked are per-chat — the settings panel's collapsed-row badges (and the
+    // floating status panel, refreshed as part of the same call) were otherwise left showing
+    // whatever chat they were last rendered for until some unrelated action (e.g. expanding a
+    // row) happened to force a re-render.
+    refreshEffectList(settings);
 });
 context.eventSource.on(context.eventTypes.CONNECTION_PROFILE_LOADED, () => refreshDetectionProfileDropdown(getSettings()));
 log('Extension loaded.');
