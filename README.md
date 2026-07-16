@@ -303,6 +303,12 @@ security boundary.
     next to each progressive effect, alongside a **Dispel now** button that immediately resets
     level, turns-active, and locked state to their defaults for the active chat — the manual
     equivalent of a dispel-keyword match, useful for testing without crafting a matching message.
+  - A **Set level** field + button next to Dispel now lets you jump straight to an arbitrary
+    level instead of always 0 — e.g. to set up a specific scene state without waiting for real
+    detection. Also resets turns-active and locked (same as Dispel now), and never auto-locks a
+    `cumulative-lock` effect even if the chosen level clears the lock threshold — only a real
+    rating locks an effect. The floating status panel has the same control per effect row, for
+    setting a level without opening the settings panel mid-scene.
 
 Multiple progressive effects using `llm` detection are batched into a **single** classification
 call per message (one prompt rating every due effect at once) rather than one call each — see

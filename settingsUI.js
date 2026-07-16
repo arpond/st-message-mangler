@@ -370,6 +370,20 @@ export function addSettingsUI() {
         log(`Manually dispelled "${effect.label}".`);
     });
 
+    // Same three-call reset as "Dispel now" above, but to an author-chosen level instead of
+    // always 0 — never auto-locks even if the chosen level clears lockThreshold, since this is a
+    // manual override, not a real rating crossing the threshold.
+    $('#st_mangler_effects').on('click', '.st_mangler_effect_set_level', function () {
+        const row = $(this).closest('.st_mangler_effect');
+        const effect = settings.effects.find(e => e.id === row.data('effect-id'));
+        if (!effect) return;
+        const level = Number(row.find('.st_mangler_set_level_input').val());
+        setEffectLevel(effect, level);
+        setEffectTurnsActive(effect, 0);
+        setEffectLocked(effect, false);
+        log(`Manually set "${effect.label}" level to ${level.toFixed(2)}.`);
+    });
+
     $('#st_mangler_effects').on('click', '.st_mangler_effect_duplicate', function () {
         const id = $(this).closest('.st_mangler_effect').data('effect-id');
         const index = settings.effects.findIndex(e => e.id === id);

@@ -1,7 +1,9 @@
 import { loadMovingUIState } from '../../../power-user.js';
 import { dragElement } from '../../../RossAscends-mods.js';
 import { getSettings } from './lib/settings.js';
-import { effectStatusBadgeHtml, setTransformPaused } from './lib/chatState.js';
+import {
+    effectStatusBadgeHtml, getEffectLevel, setEffectLevel, setEffectTurnsActive, setEffectLocked, setTransformPaused,
+} from './lib/chatState.js';
 import { escapeHtmlForDisplay } from './lib/pure.js';
 
 // ---- Floating status panel ----
@@ -15,7 +17,11 @@ import { escapeHtmlForDisplay } from './lib/pure.js';
 function renderStatusPanelRows(settings) {
     const rows = settings.effects
         .filter(e => e.enabled && e.trigger.mode === 'progressive')
-        .map(e => `<div class="st_mangler_status_row">${effectStatusBadgeHtml(e)}<span class="st_mangler_status_row_label">${escapeHtmlForDisplay(e.label || e.id)}</span></div>`)
+        .map(e => `
+            <div class="st_mangler_status_row" data-effect-id="${e.id}">
+                ${effectStatusBadgeHtml(e)}<span class="st_mangler_status_row_label">${escapeHtmlForDisplay(e.label || e.id)}</span>
+                <input type="number" class="text_pole st_mangler_status_set_level" min="0" max="1" step="0.01" value="${getEffectLevel(e).toFixed(2)}" title="Set level for this chat (also resets turns active/locked)" />
+            </div>`)
         .join('');
     return rows || '<small class="st_mangler_status_empty">No enabled progressive effects.</small>';
 }
@@ -45,6 +51,18 @@ function openStatusPanel(settings) {
     loadMovingUIState();
     dragElement($('#st_mangler_status_panel'));
     $('#st_mangler_status_panel_close').on('click', closeStatusPanel);
+    // Delegated on the outer panel (not the body) so it survives refreshStatusPanelContents'
+    // .html() replacement of just the body — no rebinding needed after every refresh. Same
+    // three-call reset as the settings panel's "Set level" button/Dispel now — never auto-locks.
+    $('#st_mangler_status_panel').on('change', '.st_mangler_status_set_level', function () {
+        const id = $(this).closest('.st_mangler_status_row').data('effect-id');
+        const effect = getSettings().effects.find(e => e.id === id);
+        if (!effect) return;
+        const level = Number($(this).val());
+        setEffectLevel(effect, level);
+        setEffectTurnsActive(effect, 0);
+        setEffectLocked(effect, false);
+    });
 }
 
 function closeStatusPanel() {

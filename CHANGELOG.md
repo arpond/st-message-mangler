@@ -6,6 +6,11 @@ successive rounds of development.
 
 ## v30
 
+- **Manually set an effect's level directly** — a new "Set level" field/button in the settings
+  panel's Trigger tab and on each row of the floating status panel jumps straight to an
+  author-chosen level, instead of only being able to dispel to 0. Resets turns-active/locked the
+  same way Dispel now does; never auto-locks a `cumulative-lock` effect even if the chosen level
+  clears the lock threshold.
 - **Fix `cumulative-lock` effects staying locked forever after raising the lock threshold** —
   a locked effect only ever unlocked via a dispel keyword; raising `lockThreshold` above the
   effect's current level in the settings UI now unlocks it immediately if it no longer qualifies.
