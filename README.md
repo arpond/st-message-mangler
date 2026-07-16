@@ -56,6 +56,8 @@ Open the **Message Mangler** drawer in the Extensions settings panel.
   for today's behavior (unchanged). `llm-rewrite` effects always use the main connection — this
   only affects detection. Requires the Connection Manager extension to be enabled with at least
   one profile configured; if none are available, this shows a note instead of a dropdown.
+  SillyTavern's own macros (`{{user}}`, `{{char}}`, etc.) work in **Condition to detect** either
+  way, whether or not a detection connection profile is set.
 - **Effects** — an ordered list, each independently configurable. Each effect collapses to one
   line (enabled checkbox, label, type, reorder/duplicate/delete) — click the chevron to expand
   it. The enabled checkbox and label are both right there in that collapsed header, editable

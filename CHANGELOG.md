@@ -6,6 +6,11 @@ successive rounds of development.
 
 ## v30
 
+- **Fix macros not substituted when a detection connection profile is set** — SillyTavern macros
+  (`{{user}}`, `{{char}}`, etc.) already worked in detection conditions via the main connection,
+  but `ConnectionManagerRequestService` (used when **Detection connection** is set to a
+  non-default profile) doesn't run macro substitution itself — they were sent completely literal
+  in that case. `runDetectionGenerate` now substitutes them explicitly either way.
 - **New "No transform (detect/track only)" effect type** — lets an effect only track/detect
   (keyword or LLM evidence → level → escalation/decay) without mangling any text, for driving an
   awareness cue or the status panel with something subtle (tiredness, enjoyment) that isn't
