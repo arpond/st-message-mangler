@@ -198,9 +198,9 @@ but that strip only works if SillyTavern's **Reasoning → Auto-Parse** setting 
 template matching your connected model's think-tag format (Advanced Formatting panel). If your
 model still leaks visible reasoning into the rewritten message, check that setting first.
 
-**Runaway-generation safety net:** the response length is capped relative to the input (6x the
-input length, floor 80 tokens, ceiling **Max response length** — 600 by default, per-effect
-configurable), and the output is checked for the classic degenerate-repetition failure mode (a
+**Runaway-generation safety net:** the response length is capped at **Max response length** —
+600 tokens by default, per-effect configurable (80-4000) — and the output is checked for the
+classic degenerate-repetition failure mode (a
 short chunk looping thousands of times, e.g. `"...ceralceralceral..."`) before being accepted —
 if either trips, the message is left unchanged and a warning is logged rather than injecting
 garbage into the chat. This is usually a sign your connected backend needs a repetition penalty

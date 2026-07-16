@@ -6,6 +6,11 @@ successive rounds of development.
 
 ## v29
 
+- **Fix `maxResponseTokens` being silently overridden by input-length scaling** — `runLlmRewrite`
+  previously capped `responseLength` at `Math.min(maxResponseTokens, 6x input length)`, so raising
+  the per-effect "Max response length" setting had no effect unless the input was already long
+  enough — reasoning models (which spend much of the budget on a `<think>` block unrelated to
+  input length) hit this hardest. The setting is now the real ceiling, no second smaller cap.
 - **Status panel reachable from the wand/extensions menu** — a new "Mangler status" entry next
   to the chat input toggles the same floating status panel as the settings-panel button, without
   needing to open Extensions and scroll to find it. Fixes findability on mobile, where the

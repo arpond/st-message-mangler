@@ -473,13 +473,14 @@ async function runLlmRewrite(text, effect, level, trueOriginal, respondingTo = '
         .replaceAll('{{scene}}', scene ? wrapUntrusted(scene, 'scene_context') : '')
         + INJECTION_GUARD
         + '\n\nRespond with ONLY the rewritten message — no reasoning, no explanation, no preamble.';
-    // Cap output length relative to the input as a cheap backstop against runaway/looping
-    // generations — generous enough for a real rewrite (up to 6x the original, floor 80 tokens)
-    // without letting a stuck decode loop run unbounded. The ceiling is per-effect configurable
-    // (effect.llmRewrite.maxResponseTokens, default 600) since a fixed ceiling could truncate an
-    // expansion-style rewrite mid-sentence on a long input — 6x a ~300-char message already hits
-    // the old hardcoded 600.
-    const responseLength = Math.min(effect.llmRewrite.maxResponseTokens, Math.max(80, Math.ceil(text.length / 3) * 6));
+    // Per-effect configurable ceiling (effect.llmRewrite.maxResponseTokens, default 600, UI-bound
+    // to [80, 4000]) on the response-length budget. Previously also capped at 6x the input length
+    // as an extra "backstop" — but Math.min-ing the two meant that scaled term silently overrode
+    // a deliberately-raised maxResponseTokens on anything but a long input, defeating the setting
+    // entirely (observed: raising to 2500 had no effect on a short message, especially with
+    // reasoning models that spend much of the budget on a <think> block unrelated to input
+    // length). The field is the real ceiling now — no second, smaller cap fighting it.
+    const responseLength = effect.llmRewrite.maxResponseTokens;
     debugLog(`runLlmRewrite "${effect.label}": level=${level.toFixed(2)} (sent to model as ${promptLevel.toFixed(2)}), promptLength=${prompt.length} chars, responseLength cap=${responseLength} tokens`);
     debugLog(`runLlmRewrite "${effect.label}": prompt sent: ${JSON.stringify(prompt)}`);
     try {
