@@ -4,6 +4,14 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v29
+
+- **Guard against catastrophic backtracking in regex effects** — a user-authored `regex` effect
+  pattern that looks like a classic ReDoS shape (nested quantifiers, overlapping quantified
+  alternation — e.g. `(a+)+`, `(a|ab)+`) is now refused before it ever reaches `new RegExp`,
+  fails open the same way an invalid pattern already did. Static heuristic, not a real execution
+  timeout — this extension has no worker thread to enforce one.
+
 ## v28
 
 - **Floating status panel** — a small draggable overlay (toggled from the settings panel toolbar)

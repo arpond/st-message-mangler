@@ -288,8 +288,10 @@ Multiple progressive effects using `llm` detection are batched into a **single**
 call per message (one prompt rating every due effect at once) rather than one call each — see
 "Max LLM calls per message" above for the overall cap.
 
-Effects run in list order. An invalid regex pattern, or a failed/unreachable LLM call, is
-skipped/logged rather than blocking your message — the pipeline fails open. Every LLM call
+Effects run in list order. An invalid regex pattern, a pattern that looks like it risks
+catastrophic backtracking (nested quantifiers, overlapping alternation with a quantifier — e.g.
+`(a+)+`), or a failed/unreachable LLM call, is skipped/logged rather than blocking your message —
+the pipeline fails open. Every LLM call
 (detector and rewrite alike) retries once automatically before falling back to this fail-open
 behavior, absorbing occasional transient connection hiccups without any visible effect on
 success — only a genuinely persistent failure reaches the fail-open path.

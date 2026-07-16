@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-    clamp01, escapeRegExp, matchesKeywordList, applyRegexEffect, applyDrunk,
+    clamp01, escapeRegExp, matchesKeywordList, applyRegexEffect, hasCatastrophicBacktrackingRisk, applyDrunk,
     looksDegenerate, escapeHtmlForDisplay, wordDiffHighlight, backfillDefaults, resolveAwarenessCue,
     resolveLevelTrend,
     resolveScaleStep, splitContinuationSuffix, generateScaleSteps, sanitizeScaleSteps,
@@ -47,6 +47,31 @@ test('applyRegexEffect is a no-op with an empty pattern', () => {
 test('applyRegexEffect fails open and warns on an invalid pattern', () => {
     const warnings = [];
     const result = applyRegexEffect('unchanged text', { pattern: '(unclosed', flags: 'gi', replacement: 'x' }, (...args) => warnings.push(args));
+    assert.equal(result, 'unchanged text');
+    assert.equal(warnings.length, 1);
+});
+
+test('hasCatastrophicBacktrackingRisk flags nested quantifiers', () => {
+    assert.equal(hasCatastrophicBacktrackingRisk('(a+)+'), true);
+    assert.equal(hasCatastrophicBacktrackingRisk('(a*)*b'), true);
+    assert.equal(hasCatastrophicBacktrackingRisk('([a-z]+)*'), true);
+});
+
+test('hasCatastrophicBacktrackingRisk flags overlapping quantified alternation', () => {
+    assert.equal(hasCatastrophicBacktrackingRisk('(a|a)+'), true);
+    assert.equal(hasCatastrophicBacktrackingRisk('(a|ab)+'), true);
+});
+
+test('hasCatastrophicBacktrackingRisk leaves ordinary mangler patterns alone', () => {
+    assert.equal(hasCatastrophicBacktrackingRisk('sword'), false);
+    assert.equal(hasCatastrophicBacktrackingRisk('\\b(sword|blade)\\b'), false);
+    assert.equal(hasCatastrophicBacktrackingRisk('[a-z]+ing'), false);
+    assert.equal(hasCatastrophicBacktrackingRisk('(the|a) knight'), false);
+});
+
+test('applyRegexEffect fails open and warns on a catastrophic-backtracking-risk pattern', () => {
+    const warnings = [];
+    const result = applyRegexEffect('unchanged text', { pattern: '(a+)+$', flags: 'gi', replacement: 'x' }, (...args) => warnings.push(args));
     assert.equal(result, 'unchanged text');
     assert.equal(warnings.length, 1);
 });
