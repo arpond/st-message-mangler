@@ -17,9 +17,9 @@ SillyTavern; no build step, no bundler, zero runtime dependencies.
 
 ## Deploying / running against real SillyTavern
 
-The local SillyTavern install is at `J:\projects\SillyTavern-Launcher\SillyTavern`; this extension
-deploys to `public\scripts\extensions\third-party\st-message-mangler\` inside it (copy the changed
-files there, reload the ST browser tab). Also use that install to check real SillyTavern API
+Deploy by copying the changed files into `public/scripts/extensions/third-party/st-message-mangler/`
+inside a SillyTavern install, then reload the ST browser tab. The machine-local install path lives
+in `CLAUDE.local.md` (untracked). Also use that install to check real SillyTavern API
 signatures (`generateRaw`, `setExtensionPrompt`, event names, `chat_metadata` handling in
 `script.js`) rather than guessing — several past bugs came from ST behaviors (metadata reassignment
 on chat switch, branch-fork metadata merging, Continue re-firing render events) that are only
