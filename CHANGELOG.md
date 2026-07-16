@@ -6,6 +6,10 @@ successive rounds of development.
 
 ## v28
 
+- **Floating status panel** — a small draggable overlay (toggled from the settings panel toolbar)
+  showing every enabled progressive effect's live level/lock badge while you chat, so you can
+  watch what's escalating without opening the Extensions drawer mid-scene. Position persists via
+  SillyTavern's Moving UI; starts closed on each reload.
 - **Locked effects no longer included in the LLM detector batch** — a `cumulative-lock` effect
   that has already locked ignores new ratings entirely, so asking the classifier to rate it was
   pure wasted prompt tokens (and, when it was the only due detector, a wasted call). If every due

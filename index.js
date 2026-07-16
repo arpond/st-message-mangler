@@ -7,6 +7,8 @@
 
 import { removeReasoningFromString } from '../../../reasoning.js';
 import { extension_prompt_types, extension_prompt_roles } from '../../../../script.js';
+import { loadMovingUIState } from '../../../power-user.js';
+import { dragElement } from '../../../RossAscends-mods.js';
 import {
     clamp01, escapeRegExp, matchesKeywordList, applyRegexEffect, applyDrunk,
     looksDegenerate, escapeHtmlForDisplay, wordDiffHighlight, backfillDefaults, resolveAwarenessCue,
@@ -1126,6 +1128,9 @@ function renderEffectList(settings) {
 
 function refreshEffectList(settings) {
     $('#st_mangler_effects').html(renderEffectList(settings));
+    // Structural changes (add/delete/reorder/mode swaps) can change which effects the floating
+    // status panel should list, so keep it in sync whenever the list rebuilds.
+    refreshStatusPanelContents(settings);
 }
 
 function setFieldByPath(obj, path, value) {
@@ -1163,6 +1168,53 @@ function exportEffects(settings) {
 function exportSingleEffect(effect) {
     const slug = effect.label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
     downloadEffectsJson([effect], `message-mangler-effect-${slug || effect.id}.json`);
+}
+
+// ---- Floating status panel ----
+// A small draggable overlay (standard ST popout pattern: .draggable div in #movingDivs, position
+// persisted via power_user.movingUIState under the element id) showing every enabled progressive
+// effect's live level/lock state without opening the Extensions drawer. Rows embed the exact same
+// effectStatusBadgeHtml markup as the collapsed effect rows, so refreshEffectStatusBadge's
+// class+data-effect-id .replaceWith() keeps both locations live with no extra call sites.
+// Open state is session-only (like expandedEffectIds) — the panel starts closed on reload.
+
+function renderStatusPanelRows(settings) {
+    const rows = settings.effects
+        .filter(e => e.enabled && e.trigger.mode === 'progressive')
+        .map(e => `<div class="st_mangler_status_row">${effectStatusBadgeHtml(e)}<span class="st_mangler_status_row_label">${escapeHtmlForDisplay(e.label || e.id)}</span></div>`)
+        .join('');
+    return rows || '<small class="st_mangler_status_empty">No enabled progressive effects.</small>';
+}
+
+// No-op when the panel isn't open — callers don't need to check first.
+function refreshStatusPanelContents(settings) {
+    $('#st_mangler_status_panel .st_mangler_status_panel_body').html(renderStatusPanelRows(settings));
+}
+
+function openStatusPanel(settings) {
+    if ($('#st_mangler_status_panel').length > 0) return;
+    const html = `
+        <div id="st_mangler_status_panel" class="draggable">
+            <div class="panelControlBar flex-container">
+                <div id="st_mangler_status_panelheader" class="fa-solid fa-grip drag-grabber hoverglow"></div>
+                <div id="st_mangler_status_panel_close" class="fa-solid fa-circle-xmark hoverglow dragClose"></div>
+            </div>
+            <div class="st_mangler_status_panel_title">Message Mangler</div>
+            <div class="st_mangler_status_panel_body">${renderStatusPanelRows(settings)}</div>
+        </div>`;
+    $('#movingDivs').append(html);
+    loadMovingUIState();
+    dragElement($('#st_mangler_status_panel'));
+    $('#st_mangler_status_panel_close').on('click', closeStatusPanel);
+}
+
+function closeStatusPanel() {
+    $('#st_mangler_status_panel').remove();
+}
+
+function toggleStatusPanel(settings) {
+    if ($('#st_mangler_status_panel').length > 0) closeStatusPanel();
+    else openStatusPanel(settings);
 }
 
 // Imported effects always get fresh ids and are appended (never replace/overwrite existing
@@ -1345,6 +1397,9 @@ function addSettingsUI() {
                         <div id="st_mangler_collapse_all" class="menu_button menu_button_icon">
                             <i class="fa-solid fa-angles-up"></i> Collapse all
                         </div>
+                        <div id="st_mangler_status_panel_toggle" class="menu_button menu_button_icon" title="Floating panel showing each progressive effect's live level while you chat">
+                            <i class="fa-solid fa-gauge-high"></i> Status panel
+                        </div>
                         <div id="st_mangler_export" class="menu_button menu_button_icon">
                             <i class="fa-solid fa-download"></i> Export effects
                         </div>
@@ -1400,6 +1455,7 @@ function addSettingsUI() {
         expandedEffectIds.clear();
         refreshEffectList(settings);
     });
+    $('#st_mangler_status_panel_toggle').on('click', () => toggleStatusPanel(settings));
 
     $('#st_mangler_export').on('click', () => exportEffects(settings));
     $('#st_mangler_import').on('click', () => $('#st_mangler_import_file').trigger('click'));
@@ -1577,6 +1633,10 @@ function addSettingsUI() {
         // visible sub-fields — full row re-render needed.
         if (fieldPath === 'type' || fieldPath === 'trigger.mode' || fieldPath === 'trigger.detector' || fieldPath === 'trigger.llmIntegrationMode' || fieldPath === 'llmRewrite.scaleMode') {
             refreshEffectList(settings);
+        } else if (fieldPath === 'enabled' || fieldPath === 'label') {
+            // Header-row edits that don't re-render the effect list but do change what the
+            // floating status panel shows (which effects are listed / their labels).
+            refreshStatusPanelContents(settings);
         }
     });
 }
@@ -1590,6 +1650,7 @@ context.eventSource.on(context.eventTypes.CHAT_CHANGED, () => {
     const settings = getSettings();
     clearAllAwarenessCues(settings);
     resetLevelsOnFreshFork(settings);
+    refreshStatusPanelContents(settings); // levels are per-chat; re-read for the new chat
 });
 context.eventSource.on(context.eventTypes.CONNECTION_PROFILE_LOADED, () => refreshDetectionProfileDropdown(getSettings()));
 log('Extension loaded.');

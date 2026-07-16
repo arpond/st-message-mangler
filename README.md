@@ -79,6 +79,16 @@ Open the **Message Mangler** drawer in the Extensions settings panel.
   LLM mode fires a real classification call and shows the raw rating. Neither ever touches the
   effect's actual level/turns/locked state for the current chat.
 
+### Floating status panel
+
+Click **Status panel** (next to Collapse all) to open a small draggable overlay listing every
+enabled progressive effect with its live level and lock state — the same 🔒/●/○ + level badge the
+collapsed effect rows show, updating in real time as messages are processed, without needing the
+Extensions drawer open mid-scene. Drag it anywhere (position persists across reloads via
+SillyTavern's Moving UI); close it with the ✕ or the same toolbar button. The panel starts closed
+on each page load. Effects with an `always` trigger aren't listed — they're trivially active at
+level 1, so there's nothing to watch.
+
 ### Debug logging
 
 There's a `debug` setting with no UI control — enable it from the browser console when you need
