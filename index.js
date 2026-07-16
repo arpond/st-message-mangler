@@ -9,6 +9,7 @@ import { removeReasoningFromString } from '../../../reasoning.js';
 import { extension_prompt_types, extension_prompt_roles } from '../../../../script.js';
 import { loadMovingUIState } from '../../../power-user.js';
 import { dragElement } from '../../../RossAscends-mods.js';
+import { context, MODULE_NAME } from './lib/context.js';
 import {
     clamp01, escapeRegExp, matchesKeywordList, applyRegexEffect, applyDrunk,
     looksDegenerate, escapeHtmlForDisplay, wordDiffHighlight, backfillDefaults, resolveAwarenessCue,
@@ -16,9 +17,6 @@ import {
     resolveScaleStep, splitContinuationSuffix, generateScaleSteps, sanitizeScaleSteps,
     buildRespondingToContext, buildSceneContext,
 } from './lib/pure.js';
-
-const context = SillyTavern.getContext();
-const MODULE_NAME = 'st_message_mangler';
 
 function defaultTrigger() {
     return {
@@ -968,7 +966,7 @@ function renderTypeFields(effect) {
                         ${field('number', 'llmRewrite.sceneLookback', effect.llmRewrite.sceneLookback, 'min="0" max="30" style="max-width: 5em;"')}
                     </label>
                     <label>
-                        Max response length (tokens)${infoIcon('Ceiling on how long a rewrite reply can be — a backstop against a stuck/looping generation, not just a style choice. Scales with input length up to this ceiling (6x the input, floor 80 tokens). Raise it if an effect that expands/elaborates on long messages is getting cut off mid-sentence; the tradeoff is more tokens/latency per call.')}
+                        Max response length (tokens)${infoIcon('Ceiling on how long a rewrite reply can be — a backstop against a stuck/looping generation, not just a style choice. Raise it if a rewrite (especially on a reasoning model, whose <think> block eats into this budget too) is getting cut off mid-sentence; the tradeoff is more tokens/latency per call.')}
                         ${field('number', 'llmRewrite.maxResponseTokens', effect.llmRewrite.maxResponseTokens, 'min="80" max="4000" step="20" style="max-width: 6em;"')}
                     </label>
                     <label>
