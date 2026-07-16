@@ -8,7 +8,7 @@ import {
     buildRespondingToContext, buildSceneContext,
     defaultTrigger, defaultEffectShape, defaultEffect, DEFAULT_SETTINGS, migrateLegacySettings,
     wrapUntrusted, INJECTION_GUARD, withTimeout, extractRating, resolveLlmRatingUpdate,
-    resolveDetectionLevelUpdate,
+    resolveDetectionLevelUpdate, buildChainPreservationNote,
 } from '../lib/pure.js';
 
 test('clamp01 clamps to [0, 1]', () => {
@@ -533,4 +533,14 @@ test('resolveDetectionLevelUpdate: autoDispelled once turnsActive exceeds maxTur
         resolveDetectionLevelUpdate(0.4, 3, 'anything', trigger),
         { level: 0.4, turnsActive: 4, dispelled: false, autoDispelled: true },
     );
+});
+
+test('buildChainPreservationNote is a no-op on the first effect in a chain', () => {
+    assert.equal(buildChainPreservationNote('hello', 'hello'), '');
+});
+
+test('buildChainPreservationNote returns a preserve-existing-changes instruction once text has changed', () => {
+    const note = buildChainPreservationNote('hello', 'hellooo (mangled)');
+    assert.match(note, /preserve/i);
+    assert.match(note, /existing changes/i);
 });

@@ -4,6 +4,14 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v30
+
+- **Chained `llm-rewrite` effects no longer silently overwrite each other's changes** — each
+  rewrite prompt now includes a fixed instruction to preserve distortions an earlier effect in
+  the chain already made, rather than leaving it entirely up to how each effect's own
+  `promptTemplate` happened to be worded. Soft nudge, not a hard guarantee — genuinely
+  conflicting effects can still fight each other.
+
 ## v29
 
 - **Split `index.js` into focused modules** — `index.js` had grown to 1677 lines mixing settings
