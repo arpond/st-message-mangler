@@ -8,6 +8,7 @@ import {
     buildRespondingToContext, buildSceneContext,
     defaultTrigger, defaultEffectShape, defaultEffect, DEFAULT_SETTINGS, migrateLegacySettings,
     wrapUntrusted, INJECTION_GUARD, withTimeout, extractRating, resolveLlmRatingUpdate,
+    resolveDetectionLevelUpdate,
 } from '../lib/pure.js';
 
 test('clamp01 clamps to [0, 1]', () => {
@@ -488,4 +489,48 @@ test('resolveLlmRatingUpdate: cumulative-lock locks once level crosses lockThres
     // Already-locked stays locked even on a non-hit (caller is expected to skip calling this
     // at all once locked, per the doc comment — this just verifies the math doesn't un-lock).
     assert.deepEqual(resolveLlmRatingUpdate(0.9, true, 1, trigger), { level: 0.85, locked: true });
+});
+
+test('resolveDetectionLevelUpdate: dispel keyword forces level/turnsActive to 0', () => {
+    const trigger = { ...defaultTrigger(), dispelKeywords: 'stop' };
+    assert.deepEqual(
+        resolveDetectionLevelUpdate(0.5, 3, 'please stop now', trigger),
+        { level: 0, turnsActive: 0, dispelled: true, autoDispelled: false },
+    );
+});
+
+test('resolveDetectionLevelUpdate: keyword detector increments/decays like resolveLlmRatingUpdate', () => {
+    const trigger = { ...defaultTrigger(), detector: 'keyword', keywords: 'tree', incrementPerHit: 0.3, decayPerTurn: 0.05, minLevelToApply: 0.05 };
+    assert.deepEqual(
+        resolveDetectionLevelUpdate(0.2, 0, 'a tree grows here', trigger),
+        { level: 0.2 + 0.3, turnsActive: 1, dispelled: false, autoDispelled: false },
+    );
+    assert.deepEqual(
+        resolveDetectionLevelUpdate(0.2, 1, 'no match here', trigger),
+        { level: 0.2 - 0.05, turnsActive: 2, dispelled: false, autoDispelled: false },
+    );
+});
+
+test('resolveDetectionLevelUpdate: llm detector leaves level unchanged but still tracks turnsActive', () => {
+    const trigger = { ...defaultTrigger(), detector: 'llm', minLevelToApply: 0.05 };
+    assert.deepEqual(
+        resolveDetectionLevelUpdate(0.4, 2, 'anything', trigger),
+        { level: 0.4, turnsActive: 3, dispelled: false, autoDispelled: false },
+    );
+});
+
+test('resolveDetectionLevelUpdate: inactive level resets turnsActive to 0', () => {
+    const trigger = { ...defaultTrigger(), detector: 'llm', minLevelToApply: 0.5 };
+    assert.deepEqual(
+        resolveDetectionLevelUpdate(0.2, 4, 'anything', trigger),
+        { level: 0.2, turnsActive: 0, dispelled: false, autoDispelled: false },
+    );
+});
+
+test('resolveDetectionLevelUpdate: autoDispelled once turnsActive exceeds maxTurnsActive', () => {
+    const trigger = { ...defaultTrigger(), detector: 'llm', minLevelToApply: 0.05, maxTurnsActive: 3 };
+    assert.deepEqual(
+        resolveDetectionLevelUpdate(0.4, 3, 'anything', trigger),
+        { level: 0.4, turnsActive: 4, dispelled: false, autoDispelled: true },
+    );
 });
