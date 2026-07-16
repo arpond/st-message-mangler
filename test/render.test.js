@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { defaultEffect, defaultEffectShape } from '../lib/pure.js';
-import { infoIcon, field, renderTriggerPanel } from '../lib/render.js';
+import { infoIcon, field, renderTriggerPanel, renderTypeFields, renderTestPanel, EFFECT_TYPE_LABELS } from '../lib/render.js';
 
 test('infoIcon renders a title-bearing icon with the given text', () => {
     assert.match(infoIcon('hello & world'), /title="hello &amp; world"/);
@@ -62,4 +62,29 @@ test('renderTriggerPanel reflects the level/turnsActive/locked values passed in,
     assert.match(html, />0\.42</);
     assert.match(html, />7</);
     assert.match(html, />yes</);
+});
+
+test('EFFECT_TYPE_LABELS includes a label for the "none" (track-only) type', () => {
+    assert.equal(EFFECT_TYPE_LABELS.none, 'Track only (no transform)');
+});
+
+test('renderTypeFields explains "none" rather than returning blank', () => {
+    const html = renderTypeFields(defaultEffect('none'));
+    assert.match(html, /No transform/);
+});
+
+test('renderTestPanel hides the level slider and Run test button for type "none"', () => {
+    const effect = defaultEffect('none');
+    effect.trigger.mode = 'progressive';
+    const html = renderTestPanel(effect);
+    assert.doesNotMatch(html, /st_mangler_test_level"/);
+    assert.doesNotMatch(html, /st_mangler_test_run/);
+    // Test detection should still show for a progressive track-only effect.
+    assert.match(html, /st_mangler_test_detect/);
+});
+
+test('renderTestPanel still shows the level slider and Run test for other types', () => {
+    const html = renderTestPanel(defaultEffect('drunk'));
+    assert.match(html, /st_mangler_test_level"/);
+    assert.match(html, /st_mangler_test_run/);
 });

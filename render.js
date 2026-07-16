@@ -48,11 +48,12 @@ export function renderEffectRow(effect) {
                         <option value="regex" ${effect.type === 'regex' ? 'selected' : ''}>Regex replace</option>
                         <option value="drunk" ${effect.type === 'drunk' ? 'selected' : ''}>Drunk mangle</option>
                         <option value="llm-rewrite" ${effect.type === 'llm-rewrite' ? 'selected' : ''}>LLM rewrite</option>
+                        <option value="none" ${effect.type === 'none' ? 'selected' : ''}>No transform (detect/track only)</option>
                     </select>
                 </div>
                 <div class="st_mangler_tab_strip">${tabStrip}</div>
                 ${pane('basics', `
-                    <label>
+                    <label style="display: ${effect.type === 'none' ? 'none' : 'block'};">
                         Target${infoIcon("Whose message this effect's transform is applied to — independent of which speaker's messages drive detection (set in the Trigger tab).")}
                         <select class="st_mangler_field" data-field="target">
                             <option value="user" ${effect.target === 'user' ? 'selected' : ''}>User messages</option>

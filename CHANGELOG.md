@@ -6,6 +6,15 @@ successive rounds of development.
 
 ## v30
 
+- **New "No transform (detect/track only)" effect type** — lets an effect only track/detect
+  (keyword or LLM evidence → level → escalation/decay) without mangling any text, for driving an
+  awareness cue or the status panel with something subtle (tiredness, enjoyment) that isn't
+  meant to change the message itself. The `Target` field is hidden for it since there's no
+  transform to apply. Test panel only shows Test detection for it, not Run test (nothing to
+  transform-test).
+- **Renamed a confusing "Structured steps" template-example option** — it shared its label with
+  the unrelated Scaling dropdown's own "Structured steps" option, reading as if the two were
+  linked when they aren't.
 - **Chained `llm-rewrite` effects no longer silently overwrite each other's changes** — each
   rewrite prompt now includes a fixed instruction to preserve distortions an earlier effect in
   the chain already made, rather than leaving it entirely up to how each effect's own
