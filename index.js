@@ -585,7 +585,10 @@ async function applyEffects(originalText, message, settings, source, isContinuat
     debugLog(`applyEffects: starting for source=${source}, ${settings.effects.length} effect(s) configured, LLM call budget=${budget.remaining}`);
 
     const dueLlmDetectors = settings.effects.filter(e => e.enabled && e.trigger.mode === 'progressive'
-        && e.trigger.detector === 'llm' && shouldDetectFromSource(e, source));
+        && e.trigger.detector === 'llm' && shouldDetectFromSource(e, source)
+        // A locked cumulative-lock effect ignores its rating entirely (see applyLlmRating), so
+        // including it just pays batch-prompt tokens for a discarded result.
+        && !(e.trigger.llmIntegrationMode === 'cumulative-lock' && getEffectLocked(e)));
     if (dueLlmDetectors.length > 0 && isContinuation) {
         debugLog(`applyEffects: skipping LLM detector batch for ${dueLlmDetectors.length} effect(s) — continuation of the same message, already rated this turn.`);
     } else if (dueLlmDetectors.length > 0) {

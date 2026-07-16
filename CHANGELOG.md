@@ -4,6 +4,13 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v28
+
+- **Locked effects no longer included in the LLM detector batch** — a `cumulative-lock` effect
+  that has already locked ignores new ratings entirely, so asking the classifier to rate it was
+  pure wasted prompt tokens (and, when it was the only due detector, a wasted call). If every due
+  detector is locked, the batch call is skipped altogether.
+
 ## v27
 
 - **`{{trend}}` placeholder for the awareness cue** — `"escalating"`, `"de-escalating"`, or
