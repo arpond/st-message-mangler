@@ -10,7 +10,7 @@ import { runBatchedLlmDetectors, runLlmRewrite } from './lib/llmClient.js';
 import {
     matchesKeywordList, applyRegexEffect, applyDrunk, escapeHtmlForDisplay, wordDiffHighlight,
     resolveAwarenessCue, resolveLevelTrend, splitContinuationSuffix, buildRespondingToContext,
-    resolveDetectionLevelUpdate,
+    resolveDetectionLevelUpdate, matchesBoundCharacter,
 } from './lib/pure.js';
 
 // Gates which hook is allowed to update an effect's level — 'user' for onMessageSent,
@@ -18,6 +18,28 @@ import {
 // it's about whose turn counts as evidence, not how that evidence is judged.
 function shouldDetectFromSource(effect, source) {
     return effect.trigger.detectSource === 'both' || effect.trigger.detectSource === source;
+}
+
+// Resolves which character a message belongs to, for effect.characterAvatar binding
+// (group-chat-aware detection/target). `original_avatar` is ST's own group-chat identity field
+// (see group-chats.js), reliably set there — but not confirmed to always be set on a regular
+// (non-group) single-character chat's messages, so this falls back to force_avatar and then the
+// chat's single active character (context.characterId) rather than guessing a message without
+// original_avatar has no character at all, which would silently break binding in single-character
+// chats where there's unambiguously only one possible character anyway.
+function resolveMessageCharacterAvatar(message) {
+    if (message.original_avatar) return message.original_avatar;
+    if (message.force_avatar) return message.force_avatar;
+    return context.characters[context.characterId]?.avatar ?? null;
+}
+
+// Wraps matchesBoundCharacter with a fail-open check: if the effect's bound character was since
+// deleted (no longer present in context.characters), treat it the same as unbound rather than
+// leaving the effect permanently unable to match anyone — same fail-open precedent as
+// isPrerequisiteMet for a broken effect dependency reference.
+function effectMatchesCharacter(effect, source, messageCharacterAvatar) {
+    if (effect.characterAvatar && !context.characters.some(c => c.avatar === effect.characterAvatar)) return true;
+    return matchesBoundCharacter(effect, source, messageCharacterAvatar);
 }
 
 // Dispel keywords are checked unconditionally (regardless of detector mode) and take priority
@@ -120,10 +142,23 @@ export async function applyEffects(originalText, message, settings, source, isCo
     // level/awarenessCue tracking below is completely unaffected, only the transform dispatch is
     // skipped.
     const transformPaused = consumeTransformPaused();
+    const messageCharacterAvatar = resolveMessageCharacterAvatar(message);
     debugLog(`applyEffects: starting for source=${source}, ${settings.effects.length} effect(s) configured, LLM call budget=${budget.remaining}${transformPaused ? ', transforms paused for this message' : ''}`);
+    // Permanent diagnostic aid for character-binding troubleshooting — kept deliberately verbose
+    // (not folded into the single-line summary above) since binding bugs are otherwise very hard
+    // to distinguish from the intentional decoupling between detection and transform (see
+    // DEVELOPMENT.md's "Detection vs. transform decoupling" note) without seeing the actual
+    // avatar values being compared. Only logs for effects that are actually bound, to avoid
+    // spamming every unbound effect on every message.
+    debugLog(`applyEffects: resolved messageCharacterAvatar=${JSON.stringify(messageCharacterAvatar)} (message.original_avatar=${JSON.stringify(message.original_avatar)}, message.force_avatar=${JSON.stringify(message.force_avatar)}, message.name=${JSON.stringify(message.name)})`);
+    for (const e of settings.effects) {
+        if (e.characterAvatar) {
+            debugLog(`applyEffects: effect "${e.label}" bound to characterAvatar=${JSON.stringify(e.characterAvatar)}, matches this message=${effectMatchesCharacter(e, source, messageCharacterAvatar)}, boundCharacterExistsInRoster=${context.characters.some(c => c.avatar === e.characterAvatar)}`);
+        }
+    }
 
     const dueLlmDetectors = settings.effects.filter(e => e.enabled && e.trigger.mode === 'progressive'
-        && e.trigger.detector === 'llm' && shouldDetectFromSource(e, source)
+        && e.trigger.detector === 'llm' && shouldDetectFromSource(e, source) && effectMatchesCharacter(e, source, messageCharacterAvatar)
         // A locked cumulative-lock effect ignores its rating entirely (see applyLlmRating), so
         // including it just pays batch-prompt tokens for a discarded result.
         && !(e.trigger.llmIntegrationMode === 'cumulative-lock' && getEffectLocked(e)));
@@ -139,7 +174,7 @@ export async function applyEffects(originalText, message, settings, source, isCo
             // get confused by overlapping quiet-generation requests. Serializing costs the
             // detector's own latency on this message instead of running for free in the
             // background, but only in this specific combination.
-            const hasRewriteEffect = settings.effects.some(e => e.enabled && e.type === 'llm-rewrite' && effectAppliesToTarget(e, source));
+            const hasRewriteEffect = settings.effects.some(e => e.enabled && e.type === 'llm-rewrite' && effectAppliesToTarget(e, source) && effectMatchesCharacter(e, source, messageCharacterAvatar));
             if (hasRewriteEffect) {
                 debugLog(`applyEffects: awaiting LLM detector batch for ${dueLlmDetectors.length} effect(s) (serialized — an llm-rewrite effect is active this message), budget remaining after=${budget.remaining}`);
                 await runBatchedLlmDetectors(dueLlmDetectors, settings.effects);
@@ -175,7 +210,7 @@ export async function applyEffects(originalText, message, settings, source, isCo
         // just its result ignored).
         const level = effect.trigger.mode === 'always'
             ? 1
-            : shouldDetectFromSource(effect, source)
+            : shouldDetectFromSource(effect, source) && effectMatchesCharacter(effect, source, messageCharacterAvatar)
                 ? updateAndGetEffectLevel(effect, originalText, isPrerequisiteMet(effect, settings.effects))
                 : getEffectLevel(effect);
         const trend = effect.trigger.mode === 'always' ? 'steady' : resolveLevelTrend(previousLevel, level);
@@ -187,6 +222,10 @@ export async function applyEffects(originalText, message, settings, source, isCo
 
         if (!effectAppliesToTarget(effect, source)) {
             debugLog(`applyEffects: "${effect.label}" — detection updated, but target=${effect.target} excludes ${source}; no transform.`);
+            continue;
+        }
+        if (!effectMatchesCharacter(effect, source, messageCharacterAvatar)) {
+            debugLog(`applyEffects: "${effect.label}" — bound to a different character than this message's speaker; no transform.`);
             continue;
         }
         if (transformPaused) {

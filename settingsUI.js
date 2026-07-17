@@ -394,6 +394,11 @@ export function addSettingsUI() {
         if (index === -1) return;
         const copy = { ...structuredClone(settings.effects[index]), id: `effect_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` };
         copy.trigger.dependsOnEffectId = ''; // never inherit a dependency — could point at the wrong effect after copying
+        // Never inherit a character binding either — the whole point of duplicating a bound
+        // effect is usually to rebind the copy to a different character (see README's
+        // "Group-chat-aware binding" section); silently keeping the same binding on both copies
+        // is an easy-to-miss source of two effects quietly fighting over the same character.
+        copy.characterAvatar = '';
         settings.effects.splice(index + 1, 0, copy); // inserted right after the original
         expandedEffectIds.add(copy.id); // opens expanded, same convention as a newly-added effect
         refreshEffectList(settings);

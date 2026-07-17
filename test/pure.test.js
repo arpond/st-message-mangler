@@ -8,7 +8,7 @@ import {
     buildRespondingToContext, buildSceneContext,
     defaultTrigger, defaultEffectShape, defaultEffect, DEFAULT_SETTINGS, migrateLegacySettings,
     wrapUntrusted, INJECTION_GUARD, withTimeout, extractRating, resolveLlmRatingUpdate,
-    resolveDetectionLevelUpdate, buildChainPreservationNote, wouldCreateCycle,
+    resolveDetectionLevelUpdate, buildChainPreservationNote, wouldCreateCycle, matchesBoundCharacter,
 } from '../lib/pure.js';
 
 test('clamp01 clamps to [0, 1]', () => {
@@ -598,4 +598,25 @@ test('resolveLlmRatingUpdate: unmet prerequisite freezes absolute mode instead o
         resolveLlmRatingUpdate(0.4, false, 9, trigger, false),
         { level: 0.4, locked: false },
     );
+});
+
+test('matchesBoundCharacter: unbound effect matches any character', () => {
+    const effect = defaultEffect('none');
+    assert.equal(matchesBoundCharacter(effect, 'character', 'alice.png'), true);
+    assert.equal(matchesBoundCharacter(effect, 'character', 'bob.png'), true);
+});
+
+test('matchesBoundCharacter: user-source always matches regardless of binding', () => {
+    const effect = defaultEffect('none');
+    effect.characterAvatar = 'alice.png';
+    assert.equal(matchesBoundCharacter(effect, 'user', 'bob.png'), true);
+    assert.equal(matchesBoundCharacter(effect, 'user', null), true);
+});
+
+test('matchesBoundCharacter: bound effect only matches its own character', () => {
+    const effect = defaultEffect('none');
+    effect.characterAvatar = 'alice.png';
+    assert.equal(matchesBoundCharacter(effect, 'character', 'alice.png'), true);
+    assert.equal(matchesBoundCharacter(effect, 'character', 'bob.png'), false);
+    assert.equal(matchesBoundCharacter(effect, 'character', null), false);
 });

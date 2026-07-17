@@ -6,6 +6,18 @@ successive rounds of development.
 
 ## v30
 
+- **Group-chat-aware character binding** — a new "Bound character" field (Basics tab) locks an
+  effect's detect/target relationship to one specific character, on top of the existing "Detect
+  from"/Target settings — for scoping an effect to react to (and only mangle) one character in a
+  group chat instead of any of them. User messages are never gated by this. Fails open if the
+  bound character is later deleted (matches everyone again, with a warning) rather than
+  permanently blocking the effect. Duplicating an effect clears the binding — the usual reason to
+  duplicate a bound effect is to rebind the copy to a different character. In a group chat, the
+  picker only lists that group's own members instead of every character in your install; the
+  floating status panel shows the bound character's name next to each effect's label so
+  duplicated per-character effects are distinguishable at a glance. Debug logging now shows the
+  resolved character for each message and whether each bound effect matched it, to make binding
+  issues easy to diagnose (verified correct via live investigation — see DEVELOPMENT.md).
 - **Effect dependency** — a new "Depends on effect" + "Min level required" pair in its own
   Dependency tab blocks one effect's level from increasing until another effect reaches a
   threshold level (decay/dispel still work normally while blocked). The dependency picker

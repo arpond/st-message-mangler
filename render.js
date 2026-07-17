@@ -1,6 +1,7 @@
 import {
     getEffectLevel, getEffectTurnsActive, getEffectLocked, effectStatusBadgeHtml, describeDependencyState,
 } from './lib/chatState.js';
+import { context } from './lib/context.js';
 import { escapeHtmlForDisplay } from './lib/pure.js';
 import {
     infoIcon, field, renderTriggerPanel, renderDependencyPanel, renderTypeFields, renderTestPanel, EFFECT_TYPE_LABELS, EFFECT_TABS,
@@ -14,6 +15,17 @@ export const expandedEffectIds = new Set();
 // Session-only, same convention as expandedEffectIds — which tab is showing per effect row.
 // Defaults to 'basics' for any effect with no entry (new/duplicated effects included).
 export const effectActiveTab = new Map();
+
+// Scopes the "Bound character" picker to the current group's members when in a group chat —
+// binding only ever matters for disambiguating between characters who might actually speak in
+// this chat, so listing the whole install's roster (most of whom can never appear here) is just
+// noise. Falls back to every character when there's no active group (context.groupId is unset).
+function bindableCharacters() {
+    if (!context.groupId) return context.characters;
+    const group = context.groups.find(g => g.id === context.groupId);
+    if (!group) return context.characters;
+    return context.characters.filter(c => group.members.includes(c.avatar));
+}
 
 export function renderEffectRow(effect, allEffects = [effect]) {
     const expanded = expandedEffectIds.has(effect.id);
@@ -64,6 +76,28 @@ export function renderEffectRow(effect, allEffects = [effect]) {
                             <option value="character" ${effect.target === 'character' ? 'selected' : ''}>AI messages</option>
                             <option value="both" ${effect.target === 'both' ? 'selected' : ''}>Both</option>
                         </select>
+                    </label>
+                    <label>
+                        Bound character (optional)${infoIcon('When set, this effect\'s detection and transform only ever consider that specific character\'s messages, regardless of the "Detect from"/Target settings — group-chat-aware. Leave as "Any character" for today\'s global behavior (matches every character). In a group chat, only shows this group\'s members.')}
+                        <select class="st_mangler_field" data-field="characterAvatar">
+                            <option value="" ${!effect.characterAvatar ? 'selected' : ''}>Any character</option>
+                            ${(() => {
+                                const options = [...bindableCharacters()]; // copy — bindableCharacters can return context.characters by reference, never mutate it
+                                // Keep the currently-selected character visible even if it's not
+                                // in this group (e.g. bound while viewing a different chat) — a
+                                // valid-but-filtered-out value shouldn't look like it silently
+                                // reset to "Any character".
+                                const selectedElsewhere = effect.characterAvatar
+                                    && !options.some(c => c.avatar === effect.characterAvatar)
+                                    && context.characters.find(c => c.avatar === effect.characterAvatar);
+                                if (selectedElsewhere) options.push(selectedElsewhere);
+                                return options.map(c => `<option value="${c.avatar}" ${effect.characterAvatar === c.avatar ? 'selected' : ''}>${escapeHtmlForDisplay(c.name)}</option>`).join('');
+                            })()}
+                        </select>
+                        ${effect.characterAvatar && !context.characters.some(c => c.avatar === effect.characterAvatar) ? `
+                        <small class="st_mangler_warning">
+                            <i class="fa-solid fa-triangle-exclamation"></i> Bound character no longer exists — currently matches no one; falling back to unbound behavior for detection/target gating.
+                        </small>` : ''}
                     </label>
                     <label>
                         Live awareness cue (optional)${infoIcon('Injected into the prompt only while this effect is active, so the character reacts to this specific moment (independent of any static World Info entry). Supports {{level}} / {{level_pct}} / {{trend}} (one of "escalating", "de-escalating", or "steady" — how the level changed since last turn, an easier signal for the model than a raw number or text diff).')}

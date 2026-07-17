@@ -1,5 +1,6 @@
 import { loadMovingUIState } from '../../../power-user.js';
 import { dragElement } from '../../../RossAscends-mods.js';
+import { context } from './lib/context.js';
 import { getSettings } from './lib/settings.js';
 import {
     effectStatusBadgeHtml, getEffectLevel, setEffectLevel, setEffectTurnsActive, setEffectLocked, setTransformPaused,
@@ -14,12 +15,21 @@ import { escapeHtmlForDisplay } from './lib/pure.js';
 // class+data-effect-id .replaceWith() keeps both locations live with no extra call sites.
 // Open state is session-only (like expandedEffectIds) — the panel starts closed on reload.
 
+// Bound-character name suffix on the row label — without this, several duplicated effects bound
+// to different characters (the documented "one effect per character" workflow) show up as
+// visually-identical rows with no way to tell which is which beyond the label text itself.
+function boundCharacterSuffix(effect) {
+    if (!effect.characterAvatar) return '';
+    const character = context.characters.find(c => c.avatar === effect.characterAvatar);
+    return character ? ` (${escapeHtmlForDisplay(character.name)})` : ' (deleted character)';
+}
+
 function renderStatusPanelRows(settings) {
     const rows = settings.effects
         .filter(e => e.enabled && e.trigger.mode === 'progressive')
         .map(e => `
             <div class="st_mangler_status_row" data-effect-id="${e.id}">
-                ${effectStatusBadgeHtml(e)}<span class="st_mangler_status_row_label">${escapeHtmlForDisplay(e.label || e.id)}</span>
+                ${effectStatusBadgeHtml(e)}<span class="st_mangler_status_row_label">${escapeHtmlForDisplay(e.label || e.id)}${boundCharacterSuffix(e)}</span>
                 <input type="number" class="text_pole st_mangler_status_set_level" min="0" max="1" step="0.01" value="${getEffectLevel(e).toFixed(2)}" title="Set level for this chat (also resets turns active/locked)" />
             </div>`)
         .join('');

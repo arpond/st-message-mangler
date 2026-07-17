@@ -310,6 +310,27 @@ security boundary.
     rating locks an effect. The floating status panel has the same control per effect row, for
     setting a level without opening the settings panel mid-scene.
 
+### Group-chat-aware binding
+
+The **Bound character** field (Basics tab, optional, "Any character" by default) locks an
+effect's detect/target relationship to one specific character, independent of the existing
+**Detect from**/**Target** settings. Unbound (the default) matches every character, same as
+before — the binding only ever *restricts* which character's messages count, both for detection
+and for the transform. Useful in group chats: without it, `detectSource: character`/`target:
+character` respond to *any* character's dialogue; binding narrows that to one specific character,
+so e.g. a "jealousy" effect can be scoped to only react to (and only mangle) one particular
+character rather than the whole group. User messages are never gated by this — there's only one
+"you" in a chat, so binding has nothing to restrict there. If the bound character is later
+deleted, the binding fails open (treated as unbound, matches everyone again) rather than
+permanently blocking the effect — a warning under the field explains this if it happens. To
+combine several characters under one effect, use **Duplicate effect** and bind each copy to a
+different character (a duplicate never inherits the binding — always starts at "Any character").
+In a group chat, the picker only lists that group's own members rather than every character in
+your install; a character you'd already bound to from outside the group still shows correctly,
+it just won't appear as a *new* option there. The floating status panel shows the bound
+character's name next to each effect's label, so duplicated per-character effects (the workflow
+above) are distinguishable at a glance instead of looking like identical rows.
+
 ### Effect dependency
 
 The **Dependency** tab (separate from Trigger) has a **Depends on effect** field (optional,
