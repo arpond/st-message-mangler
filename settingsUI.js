@@ -592,10 +592,11 @@ export function addSettingsUI() {
         // visible sub-fields — full row re-render needed. A dependency row's effectId pick also
         // needs it: re-evaluates the broken/blocked status line, and every OTHER effect's own
         // dependency picker needs its cycle-safe/already-chosen option list re-evaluated as the
-        // graph changes. A dependency row's minLevel doesn't need this (same as before
-        // multi-dependency support — the status line only refreshes on the next natural
-        // re-render, not live on every number tweak).
-        if (fieldPath === 'type' || fieldPath === 'trigger.mode' || fieldPath === 'trigger.detector' || fieldPath === 'trigger.llmIntegrationMode' || fieldPath === 'llmRewrite.scaleMode' || /^trigger\.dependencies\.\d+\.effectId$/.test(fieldPath)) {
+        // graph changes. minLevel needs it too — the blocked-status text embeds the configured
+        // value directly ("waiting for X to reach level <minLevel>"), and raising/lowering it can
+        // flip whether the prerequisite is currently satisfied at all, so the caution icon can go
+        // stale exactly like the effectId case if this isn't included.
+        if (fieldPath === 'type' || fieldPath === 'trigger.mode' || fieldPath === 'trigger.detector' || fieldPath === 'trigger.llmIntegrationMode' || fieldPath === 'llmRewrite.scaleMode' || /^trigger\.dependencies\.\d+\.(effectId|minLevel)$/.test(fieldPath)) {
             refreshEffectList(settings);
         } else if (fieldPath === 'enabled' || fieldPath === 'label') {
             // Header-row edits that don't re-render the effect list but do change what the

@@ -4,6 +4,18 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v34
+
+- **Scale by rating magnitude for LLM cumulative modes** — new opt-in checkbox (Cumulative/
+  Cumulative-lock modes) scales Increment per hit/Decay per turn by how far the rating landed
+  from Hit threshold instead of always applying the full step — a rating just past threshold
+  moves the level a little, a rating near 10 (or near 0, for a miss) moves it close to the full
+  step. Off by default, no behavior change unless enabled.
+- **Fixed**: editing a dependency's min-level didn't refresh the caution icon/blocked-status
+  line, even when the new value meant the dependency was now satisfied — same gap the original
+  single-dependency version had. The settings panel now re-renders on a min-level edit, same as
+  it already did for picking a different dependency.
+
 ## v33
 
 - **Multiple dependencies per effect** — the Dependency tab now supports zero or more

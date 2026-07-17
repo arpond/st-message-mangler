@@ -127,10 +127,25 @@
     margin: 0.35em 0;
 }
 
-.st-message-mangler-settings .st_mangler_trigger_row input,
+.st-message-mangler-settings .st_mangler_trigger_row input:not([type="checkbox"]),
 .st-message-mangler-settings .st_mangler_trigger_row select {
     display: block;
     margin-top: 0.15em;
+}
+
+.st-message-mangler-settings .st_mangler_trigger_row input[type="checkbox"] {
+    vertical-align: middle;
+    margin-right: 0.3em;
+}
+
+.st-message-mangler-settings .st_mangler_checkbox_row {
+    align-items: center;
+    gap: 0.3em;
+}
+
+.st-message-mangler-settings .st_mangler_checkbox_row input[type="checkbox"] {
+    flex: 0 0 auto;
+    margin: 0;
 }
 
 .st-message-mangler-settings .st_mangler_trigger_section_header {

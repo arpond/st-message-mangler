@@ -10,7 +10,7 @@ import {
     wrapUntrusted, INJECTION_GUARD, withTimeout, extractRating, resolveLlmRatingUpdate,
     resolveDetectionLevelUpdate, buildChainPreservationNote, wouldCreateCycle, matchesBoundCharacter,
     resolveChatActiveState, resolveBindableCharacters, restingLevelValue, meetsDirectionalThreshold,
-    resolveHitLevel, migrateEffectDependency,
+    resolveHitLevel, migrateEffectDependency, resolveLlmMagnitudeScale,
 } from '../lib/pure.js';
 
 test('clamp01 clamps to [0, 1]', () => {
@@ -723,6 +723,56 @@ test('resolveHitLevel: jump behavior goes straight to the hitDirection extreme o
     assert.equal(resolveHitLevel(0.2, true, increasing), 1);
     const decreasing = { ...defaultTrigger(), hitDirection: 'decrease', hitBehavior: 'jump' };
     assert.equal(resolveHitLevel(0.8, true, decreasing), 0);
+});
+
+test('resolveHitLevel: a magnitudeScale below 1 proportionally shrinks increment and decay', () => {
+    const trigger = { ...defaultTrigger(), incrementPerHit: 0.3, decayPerTurn: 0.1 };
+    assert.equal(resolveHitLevel(0.2, true, trigger, 0.5), 0.2 + 0.15);
+    assert.equal(resolveHitLevel(0.2, false, trigger, 0.5), 0.2 - 0.05);
+});
+
+test('resolveLlmMagnitudeScale: disabled (default) always returns 1', () => {
+    const trigger = { ...defaultTrigger(), llmHitThreshold: 5 };
+    assert.equal(resolveLlmMagnitudeScale(9, true, trigger), 1);
+    assert.equal(resolveLlmMagnitudeScale(1, false, trigger), 1);
+});
+
+test('resolveLlmMagnitudeScale: hit scales by distance above threshold toward 10', () => {
+    const trigger = { ...defaultTrigger(), llmMagnitudeScaling: true, llmHitThreshold: 5 };
+    assert.equal(resolveLlmMagnitudeScale(7.5, true, trigger), 0.5); // (7.5-5)/(10-5)
+    assert.equal(resolveLlmMagnitudeScale(5, true, trigger), 0); // right at threshold, no scale
+    assert.equal(resolveLlmMagnitudeScale(10, true, trigger), 1);
+});
+
+test('resolveLlmMagnitudeScale: no-hit scales by distance below threshold toward 0', () => {
+    const trigger = { ...defaultTrigger(), llmMagnitudeScaling: true, llmHitThreshold: 5 };
+    assert.equal(resolveLlmMagnitudeScale(2.5, false, trigger), 0.5); // (5-2.5)/5
+    assert.equal(resolveLlmMagnitudeScale(0, false, trigger), 1);
+});
+
+test('resolveLlmMagnitudeScale: threshold-10 and threshold-0 edge guards return 1 rather than dividing by zero', () => {
+    const highThreshold = { ...defaultTrigger(), llmMagnitudeScaling: true, llmHitThreshold: 10 };
+    assert.equal(resolveLlmMagnitudeScale(10, true, highThreshold), 1);
+    const lowThreshold = { ...defaultTrigger(), llmMagnitudeScaling: true, llmHitThreshold: 0 };
+    assert.equal(resolveLlmMagnitudeScale(0, false, lowThreshold), 1);
+});
+
+test('resolveLlmMagnitudeScale: blocked prerequisite always returns 1 regardless of rating', () => {
+    const trigger = { ...defaultTrigger(), llmMagnitudeScaling: true, llmHitThreshold: 5 };
+    assert.equal(resolveLlmMagnitudeScale(9, true, trigger, false), 1);
+});
+
+test('resolveLlmRatingUpdate: magnitude scaling makes a near-threshold rating increment less than a near-max one', () => {
+    const trigger = { ...defaultTrigger(), llmIntegrationMode: 'cumulative', llmMagnitudeScaling: true, llmHitThreshold: 5, incrementPerHit: 0.4 };
+    const nearThreshold = resolveLlmRatingUpdate(0.2, false, 5.5, trigger);
+    const nearMax = resolveLlmRatingUpdate(0.2, false, 10, trigger);
+    assert.ok(nearThreshold.level - 0.2 < nearMax.level - 0.2);
+    assert.equal(nearMax.level, 0.2 + 0.4);
+});
+
+test('resolveLlmRatingUpdate: magnitude scaling still decays at the flat rate when blocked by a dependency', () => {
+    const trigger = { ...defaultTrigger(), llmIntegrationMode: 'cumulative', llmMagnitudeScaling: true, llmHitThreshold: 5, decayPerTurn: 0.1 };
+    assert.deepEqual(resolveLlmRatingUpdate(0.5, false, 9, trigger, false), { level: 0.5 - 0.1, locked: false });
 });
 
 test('resolveDetectionLevelUpdate: restingLevel high dispels/no-hit-decays toward 1 instead of 0', () => {

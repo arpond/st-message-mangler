@@ -293,7 +293,11 @@ security boundary.
       (rating ≥ threshold = hit), then the level increments/decays exactly like keyword mode
       (**Increment per hit** / **Decay per turn**). Gives the level momentum — it builds up over
       several consecutive hits and eases off on quiet turns, rather than jumping around with
-      each individual rating.
+      each individual rating. **Scale by rating magnitude** (off by default) changes how much of
+      that step gets applied: instead of always applying the full Increment per hit/Decay per
+      turn, it scales by how far the rating landed from Hit threshold — a hit rating just above
+      threshold applies only a small fraction, a rating at 10 applies the full amount (and
+      symmetrically for a miss rating approaching 0).
     - **Cumulative, locks once triggered** — same as cumulative, but once the level reaches
       **Lock threshold** it locks: further ratings are ignored entirely (no increment, no decay)
       until a **Dispel keyword** clears it. Use this for a condition that, once clearly true,
