@@ -85,7 +85,7 @@ export function renderEffectRow(effect, allEffects = [effect]) {
                         Trigger:
                         <select class="st_mangler_field" data-field="trigger.mode">
                             <option value="always" ${effect.trigger.mode === 'always' ? 'selected' : ''}>Always (every message)</option>
-                            <option value="progressive" ${effect.trigger.mode === 'progressive' ? 'selected' : ''}>Progressive (escalates from detected activity)</option>
+                            <option value="progressive" ${effect.trigger.mode === 'progressive' ? 'selected' : ''}>Progressive (level responds to detected activity)</option>
                         </select>
                     </label>
                     ${renderTriggerPanel(effect, getEffectLevel(effect), getEffectTurnsActive(effect), getEffectLocked(effect))}`)}

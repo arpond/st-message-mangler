@@ -4,6 +4,23 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v32
+
+- **Configurable resting level, hit direction, and hit behavior for progressive effects** — three
+  new Trigger-tab fields generalize the old fixed "starts at 0, a hit increments, a non-hit decays
+  toward 0" shape: **Resting level** (Low/High — where the effect settles with no hits, and what
+  Dispel now/a dispel keyword/auto-dispel/a fresh chat fork restore it to), **Hit direction**
+  (Increase/Decrease — which way a hit moves the level, e.g. "trust" eroding on a betrayal
+  keyword), and **Hit behavior** (Gradual/Jump — nudge by "Increment per hit", or jump straight to
+  the extreme on any hit, e.g. a "fresh wound" that's instantly intense then fades). "Min level to
+  apply"/"Lock threshold" automatically mirror their meaning for a Decrease-direction effect so the
+  same 0-1 value still means "how far toward the hit direction's extreme" either way. The
+  `{{trend}}` awareness-cue macro also accounts for direction now, so a hit on a Decrease effect
+  reads as "escalating" (intensifying) rather than "de-escalating". All three fields default to
+  today's exact behavior — fully backward compatible, no migration needed.
+- **Reorder scale steps** — Structured-steps rows in the llm-rewrite editor gained move-up/
+  move-down buttons alongside delete, mirroring the existing effect-list reorder controls.
+
 ## v31
 
 - **Per-chat activation and character binding** — replaces v30's global "Bound character" field.

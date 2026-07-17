@@ -38,7 +38,7 @@ test('renderTriggerPanel shows increment/decay for keyword mode but hides lock t
     const effect = defaultEffect('regex');
     effect.trigger.detector = 'keyword';
     const html = renderTriggerPanel(effect, 0, 0, false);
-    assert.match(html, /Increment per hit:[\s\S]*?style="display: block/);
+    assert.match(html, /Increment per hit[\s\S]*?style="display: block/);
     assert.match(html, /Lock threshold[\s\S]*?style="display: none/);
 });
 
@@ -55,7 +55,16 @@ test('renderTriggerPanel hides increment/decay for llm + absolute mode', () => {
     effect.trigger.detector = 'llm';
     effect.trigger.llmIntegrationMode = 'absolute';
     const html = renderTriggerPanel(effect, 0, 0, false);
-    assert.match(html, /Increment per hit:[\s\S]*?style="display: none/);
+    assert.match(html, /Increment per hit[\s\S]*?style="display: none/);
+});
+
+test('renderTriggerPanel hides increment per hit (but not decay) when hit behavior is jump', () => {
+    const effect = defaultEffect('regex');
+    effect.trigger.detector = 'keyword';
+    effect.trigger.hitBehavior = 'jump';
+    const html = renderTriggerPanel(effect, 0, 0, false);
+    assert.match(html, /style="display: none;">\s*Increment per hit/);
+    assert.match(html, /style="display: block;">\s*Decay per turn/);
 });
 
 test('renderTriggerPanel reflects the level/turnsActive/locked values passed in, not internal state', () => {

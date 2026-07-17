@@ -9,7 +9,8 @@ import {
     defaultTrigger, defaultEffectShape, defaultEffect, DEFAULT_SETTINGS, migrateLegacySettings,
     wrapUntrusted, INJECTION_GUARD, withTimeout, extractRating, resolveLlmRatingUpdate,
     resolveDetectionLevelUpdate, buildChainPreservationNote, wouldCreateCycle, matchesBoundCharacter,
-    resolveChatActiveState, resolveBindableCharacters,
+    resolveChatActiveState, resolveBindableCharacters, restingLevelValue, meetsDirectionalThreshold,
+    resolveHitLevel,
 } from '../lib/pure.js';
 
 test('clamp01 clamps to [0, 1]', () => {
@@ -231,6 +232,11 @@ test('resolveLevelTrend treats an unchanged level as steady', () => {
 test('resolveLevelTrend absorbs small drift within the epsilon as steady', () => {
     assert.equal(resolveLevelTrend(0.5, 0.51), 'steady');
     assert.equal(resolveLevelTrend(0.5, 0.49), 'steady');
+});
+
+test('resolveLevelTrend: decrease direction flips which numeric direction counts as escalating', () => {
+    assert.equal(resolveLevelTrend(0.6, 0.3, 'decrease'), 'escalating'); // level dropped, but that's toward the hit extreme
+    assert.equal(resolveLevelTrend(0.3, 0.6, 'decrease'), 'de-escalating'); // level rose, fading back toward resting
 });
 
 test('wordDiffHighlight marks only the words that actually changed', () => {
@@ -654,4 +660,56 @@ test('resolveBindableCharacters: regular chat returns only the one active charac
 test('resolveBindableCharacters: no group and no resolvable characterId falls back to the full roster', () => {
     const characters = [{ avatar: 'alice.png' }, { avatar: 'bob.png' }];
     assert.deepEqual(resolveBindableCharacters(characters, undefined, [], undefined), characters);
+});
+
+test('restingLevelValue: low is 0, high is 1', () => {
+    assert.equal(restingLevelValue('low'), 0);
+    assert.equal(restingLevelValue('high'), 1);
+});
+
+test('meetsDirectionalThreshold: increase direction behaves like a plain >= (regression)', () => {
+    assert.equal(meetsDirectionalThreshold(0.5, 0.5, 'increase'), true);
+    assert.equal(meetsDirectionalThreshold(0.49, 0.5, 'increase'), false);
+});
+
+test('meetsDirectionalThreshold: decrease direction mirrors the threshold across 0.5', () => {
+    assert.equal(meetsDirectionalThreshold(0.1, 0.8, 'decrease'), true); // 0.1 <= 1 - 0.8
+    assert.equal(meetsDirectionalThreshold(0.3, 0.8, 'decrease'), false); // 0.3 > 1 - 0.8
+});
+
+test('resolveHitLevel: increment direction increase nudges up on a hit, decays down otherwise', () => {
+    const trigger = { ...defaultTrigger(), incrementPerHit: 0.3, decayPerTurn: 0.05 };
+    assert.equal(resolveHitLevel(0.2, true, trigger), 0.5);
+    assert.equal(resolveHitLevel(0.2, false, trigger), 0.2 - 0.05);
+});
+
+test('resolveHitLevel: increment direction decrease nudges down on a hit, drifts up otherwise', () => {
+    const trigger = { ...defaultTrigger(), hitDirection: 'decrease', restingLevel: 'high', incrementPerHit: 0.3, decayPerTurn: 0.05 };
+    assert.equal(resolveHitLevel(0.8, true, trigger), 0.5);
+    assert.equal(resolveHitLevel(0.8, false, trigger), 0.8 + 0.05);
+});
+
+test('resolveHitLevel: jump behavior goes straight to the hitDirection extreme on a hit', () => {
+    const increasing = { ...defaultTrigger(), hitBehavior: 'jump' };
+    assert.equal(resolveHitLevel(0.2, true, increasing), 1);
+    const decreasing = { ...defaultTrigger(), hitDirection: 'decrease', hitBehavior: 'jump' };
+    assert.equal(resolveHitLevel(0.8, true, decreasing), 0);
+});
+
+test('resolveDetectionLevelUpdate: restingLevel high dispels/no-hit-decays toward 1 instead of 0', () => {
+    const trigger = { ...defaultTrigger(), dispelKeywords: 'stop', restingLevel: 'high', detector: 'keyword', keywords: 'never-matches', decayPerTurn: 0.05, minLevelToApply: 0.5, hitDirection: 'decrease' };
+    assert.deepEqual(
+        resolveDetectionLevelUpdate(0.5, 3, 'please stop now', trigger),
+        { level: 1, turnsActive: 0, dispelled: true, autoDispelled: false },
+    );
+    assert.deepEqual(
+        resolveDetectionLevelUpdate(0.8, 0, 'no match here', trigger),
+        { level: 0.8 + 0.05, turnsActive: 0, dispelled: false, autoDispelled: false },
+    );
+});
+
+test('resolveLlmRatingUpdate: restingLevel high + decrease direction erodes on a hit, locks via mirrored lockThreshold', () => {
+    const trigger = { ...defaultTrigger(), llmIntegrationMode: 'cumulative-lock', restingLevel: 'high', hitDirection: 'decrease', llmHitThreshold: 5, incrementPerHit: 0.3, lockThreshold: 0.8 };
+    assert.deepEqual(resolveLlmRatingUpdate(0.9, false, 7, trigger), { level: 0.9 - 0.3, locked: false });
+    assert.deepEqual(resolveLlmRatingUpdate(0.3, false, 7, trigger), { level: 0, locked: true });
 });

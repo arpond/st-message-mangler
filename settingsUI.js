@@ -7,6 +7,7 @@ import { runDetectionTest } from './lib/llmClient.js';
 import {
     escapeHtmlForDisplay, resolveAwarenessCue, backfillDefaults,
     resolveScaleStep, generateScaleSteps, sanitizeScaleSteps, defaultEffectShape, defaultEffect,
+    restingLevelValue,
 } from './lib/pure.js';
 import { infoIcon, PROMPT_TEMPLATE_EXAMPLES, EFFECT_TYPE_LABELS } from './lib/render.js';
 import { applySingleEffect, clearAllAwarenessCues, awarenessCueKey } from './pipeline.js';
@@ -34,6 +35,14 @@ function moveEffect(settings, id, delta) {
     const target = index + delta;
     if (index === -1 || target < 0 || target >= settings.effects.length) return;
     [settings.effects[index], settings.effects[target]] = [settings.effects[target], settings.effects[index]];
+}
+
+// Same no-op-past-either-edge pattern as moveEffect above, applied to one effect's scaleSteps array.
+function moveScaleStep(effect, index, delta) {
+    const steps = effect.llmRewrite.scaleSteps;
+    const target = index + delta;
+    if (target < 0 || target >= steps.length) return;
+    [steps[index], steps[target]] = [steps[target], steps[index]];
 }
 
 function downloadEffectsJson(effects, filename) {
@@ -368,7 +377,7 @@ export function addSettingsUI() {
     $('#st_mangler_effects').on('click', '.st_mangler_effect_dispel_now', function () {
         const effect = settings.effects.find(e => e.id === $(this).closest('.st_mangler_effect').data('effect-id'));
         if (!effect) return;
-        setEffectLevel(effect, 0);
+        setEffectLevel(effect, restingLevelValue(effect.trigger.restingLevel));
         setEffectTurnsActive(effect, 0);
         setEffectLocked(effect, false);
         log(`Manually dispelled "${effect.label}".`);
@@ -460,6 +469,24 @@ export function addSettingsUI() {
         const effect = settings.effects.find(e => e.id === id);
         if (!effect) return;
         effect.llmRewrite.scaleSteps.splice($(this).data('step-index'), 1);
+        refreshEffectList(settings);
+        context.saveSettingsDebounced();
+    });
+
+    $('#st_mangler_effects').on('click', '.st_mangler_scale_step_move_up', function () {
+        const id = $(this).closest('.st_mangler_effect').data('effect-id');
+        const effect = settings.effects.find(e => e.id === id);
+        if (!effect) return;
+        moveScaleStep(effect, $(this).data('step-index'), -1);
+        refreshEffectList(settings);
+        context.saveSettingsDebounced();
+    });
+
+    $('#st_mangler_effects').on('click', '.st_mangler_scale_step_move_down', function () {
+        const id = $(this).closest('.st_mangler_effect').data('effect-id');
+        const effect = settings.effects.find(e => e.id === id);
+        if (!effect) return;
+        moveScaleStep(effect, $(this).data('step-index'), 1);
         refreshEffectList(settings);
         context.saveSettingsDebounced();
     });

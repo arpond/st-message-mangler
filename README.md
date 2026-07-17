@@ -188,7 +188,8 @@ list fills in N steps at computed thresholds in one click (Linear: evenly spaced
 clustered toward the low end, more resolution for subtle early changes). It replaces whatever
 steps are already there — if the step count is unchanged, each step's existing text is carried
 over at its new (re-spaced) threshold; if the count changes, text comes back blank since there's
-no meaningful way to map old bands onto a different number of new ones.
+no meaningful way to map old bands onto a different number of new ones. Each step also has
+move-up/move-down buttons alongside delete, for reordering by hand.
 
 Example:
 
@@ -240,9 +241,22 @@ security boundary.
 ### Triggers
 
 - **Always** — the effect runs on every message while enabled.
-- **Progressive** — the effect's strength is driven by a per-chat 0–1 "level" that escalates
-  based on detected activity in the user's and/or the AI character's recent messages (see
-  **Detect from** below), and decays back down on quiet turns. Two detectors:
+- **Progressive** — the effect's strength is driven by a per-chat 0–1 "level" that moves based on
+  detected activity in the user's and/or the AI character's recent messages (see **Detect from**
+  below), and drifts back toward its resting level on quiet turns. Three fields shape this:
+  - **Resting level** — **Low (0)** (default) or **High (1)**: what the level starts at and what
+    it returns to on Dispel now, a dispel-keyword match, auto-dispel, or a fresh chat fork.
+  - **Hit direction** — **Increase** (default) or **Decrease**: which way a hit moves the level.
+    "Decrease" also mirrors **Min level to apply**/**Lock threshold** below (same 0–1 meaning,
+    "how far toward the hit direction's extreme") so they still mean the same thing either way —
+    e.g. a "trust" effect with resting **High** and direction **Decrease** starts fully trusting
+    and erodes on a betrayal keyword, recovering on quiet turns.
+  - **Hit behavior** — **Gradual** (default, nudges by **Increment per hit**) or **Jump** (any hit
+    sends the level straight to the extreme in **Hit direction**, e.g. a "fresh wound" that's
+    instantly intense then fades). **Increment per hit** is hidden when Jump is selected, since
+    it's unused there.
+
+  Two detectors:
   - **Keyword match** (default, free, instant) — scans messages against a comma-separated
     **Keywords** list. A hit raises the level by "increment per hit"; no hit lowers it by "decay
     per turn".
@@ -294,15 +308,15 @@ security boundary.
   - **Min level to apply** — below this, the effect is skipped entirely (dormant), avoiding
     wasted regex/drunk/LLM work when nothing's triggered it yet.
   - **Dispel keywords** — a separate comma-separated word list, checked every turn regardless of
-    detector mode. A match forces the level straight to 0 immediately — an explicit "the spell is
-    broken" override, independent of normal decay.
-  - **Max turns active** (0 = disabled) — auto-dispels an effect that's stayed at/above its min
-    level for this many consecutive turns, so an escalating effect doesn't just plateau forever
-    once maxed out.
+    detector mode. A match forces the level straight back to its resting level immediately — an
+    explicit "the spell is broken" override, independent of normal drift.
+  - **Max turns active** (0 = disabled) — auto-dispels (back to resting level) an effect that's
+    stayed active for this many consecutive turns, so it doesn't just plateau forever.
   - The current level, turns-active count, and locked state for the active chat are shown live
     next to each progressive effect, alongside a **Dispel now** button that immediately resets
-    level, turns-active, and locked state to their defaults for the active chat — the manual
-    equivalent of a dispel-keyword match, useful for testing without crafting a matching message.
+    level, turns-active, and locked state back to their resting level for the active chat — the
+    manual equivalent of a dispel-keyword match, useful for testing without crafting a matching
+    message.
   - A **Set level** field + button next to Dispel now lets you jump straight to an arbitrary
     level instead of always 0 — e.g. to set up a specific scene state without waiting for real
     detection. Also resets turns-active and locked (same as Dispel now), and never auto-locks a

@@ -10,7 +10,8 @@ import { runBatchedLlmDetectors, runLlmRewrite } from './lib/llmClient.js';
 import {
     matchesKeywordList, applyRegexEffect, applyDrunk, escapeHtmlForDisplay, wordDiffHighlight,
     resolveAwarenessCue, resolveLevelTrend, splitContinuationSuffix, buildRespondingToContext,
-    resolveDetectionLevelUpdate, matchesBoundCharacter, resolveChatActiveState,
+    resolveDetectionLevelUpdate, matchesBoundCharacter, resolveChatActiveState, restingLevelValue,
+    meetsDirectionalThreshold,
 } from './lib/pure.js';
 
 // Gates which hook is allowed to update an effect's level — 'user' for onMessageSent,
@@ -70,7 +71,7 @@ function updateAndGetEffectLevel(effect, detectionText, prerequisiteMet) {
         setEffectTurnsActive(effect, 0);
         setEffectLocked(effect, false);
         log(`Dispelled "${effect.label}" — dispel keyword matched.`);
-        return setEffectLevel(effect, 0);
+        return setEffectLevel(effect, restingLevelValue(effect.trigger.restingLevel));
     }
 
     // llm detector: level is read-only here (runBatchedLlmDetectors updates it elsewhere) — avoid
@@ -83,7 +84,7 @@ function updateAndGetEffectLevel(effect, detectionText, prerequisiteMet) {
     if (result.autoDispelled) {
         setEffectTurnsActive(effect, 0);
         log(`Auto-dispelled "${effect.label}" — active for ${turns} turns (max ${effect.trigger.maxTurnsActive}).`);
-        return setEffectLevel(effect, 0);
+        return setEffectLevel(effect, restingLevelValue(effect.trigger.restingLevel));
     }
     return level;
 }
@@ -227,12 +228,12 @@ export async function applyEffects(originalText, message, settings, source, isCo
             : shouldDetectFromSource(effect, source) && effectMatchesCharacter(effect, source, messageCharacterAvatar)
                 ? updateAndGetEffectLevel(effect, originalText, isPrerequisiteMet(effect, settings.effects))
                 : getEffectLevel(effect);
-        const trend = effect.trigger.mode === 'always' ? 'steady' : resolveLevelTrend(previousLevel, level);
+        const trend = effect.trigger.mode === 'always' ? 'steady' : resolveLevelTrend(previousLevel, level, effect.trigger.hitDirection);
 
         // Awareness cue reflects the effect's true current state regardless of target — an
         // effect can be "active" (driving the narrative cue) without this speaker's message
         // being the one it transforms.
-        updateAwarenessCue(effect, level, level >= effect.trigger.minLevelToApply, trend);
+        updateAwarenessCue(effect, level, meetsDirectionalThreshold(level, effect.trigger.minLevelToApply, effect.trigger.hitDirection), trend);
 
         if (!effectAppliesToTarget(effect, source)) {
             debugLog(`applyEffects: "${effect.label}" — detection updated, but target=${effect.target} excludes ${source}; no transform.`);
@@ -246,8 +247,8 @@ export async function applyEffects(originalText, message, settings, source, isCo
             debugLog(`applyEffects: "${effect.label}" — detection updated, but transforms are paused for this message.`);
             continue;
         }
-        if (level < effect.trigger.minLevelToApply) {
-            debugLog(`applyEffects: "${effect.label}" skipped — threshold not reached: level=${level.toFixed(2)} < minLevelToApply=${effect.trigger.minLevelToApply}`);
+        if (!meetsDirectionalThreshold(level, effect.trigger.minLevelToApply, effect.trigger.hitDirection)) {
+            debugLog(`applyEffects: "${effect.label}" skipped — threshold not reached: level=${level.toFixed(2)}, minLevelToApply=${effect.trigger.minLevelToApply}, hitDirection=${effect.trigger.hitDirection}`);
             continue;
         }
 
