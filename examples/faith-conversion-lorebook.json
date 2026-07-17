@@ -2,10 +2,10 @@
   "entries": {
     "0": {
       "uid": 0,
-      "key": ["tree", "trees", "forest", "oak", "pine", "woodland"],
+      "key": ["pray", "prayer", "scripture", "rite", "ritual", "worship", "devotion", "faith"],
       "keysecondary": [],
-      "comment": "Tree Love Compulsion (mechanic)",
-      "content": "{{user}} carries a strange, growing compulsion: the more {{user}} speaks of trees — mentioning them, describing them, dwelling on them — the stronger an uncontrollable urge grows in {{user}} to profess overwhelming love for trees. It builds gradually with repeated mention and fades if the subject is dropped for a while. This affects {{user}} specifically, not other people in the scene.",
+      "comment": "Faith Cracks (mechanic)",
+      "content": "{{user}} was raised deeply skeptical of the old faith, but that skepticism was never as solid as {{user}} liked to believe. Each time the old faith is invoked nearby — prayers spoken aloud, rites performed, scripture quoted — something in {{user}} responds, a flicker of belief pushing back against the doubt. Long, repeated exposure could turn quiet skepticism into open devotion. This affects {{user}} specifically, not other people in the scene.",
       "constant": true,
       "vectorized": false,
       "selective": true,

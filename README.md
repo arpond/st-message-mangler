@@ -7,6 +7,10 @@ your own messages, but can be set to also or instead rewrite the character's rep
 displayed bubble and the model's actual context reflect the final mangled text; optionally you
 can also show the original alongside it (display-only — the model never sees the original).
 
+**Contents:** [Install](#install) · [Usage](#usage) · [Configuring an effect](#configuring-an-effect)
+· [Day-to-day tools](#day-to-day-tools) · [Example effects](#example-effects) · [FAQ](#faq) ·
+[Troubleshooting](#troubleshooting) · [How it works](#how-it-works)
+
 ## Install
 
 ### Via SillyTavern's extension installer (recommended)
@@ -81,50 +85,7 @@ Open the **Message Mangler** drawer in the Extensions settings panel.
   LLM mode fires a real classification call and shows the raw rating. Neither ever touches the
   effect's actual level/turns/locked state for the current chat.
 
-### Floating status panel
-
-Click **Status panel** (next to Collapse all in the extension's settings), or **Mangler status**
-in the wand/extensions menu next to the chat input, to open a small draggable overlay listing
-every enabled progressive effect with its live level and lock state — the same 🔒/●/○ + level
-badge the collapsed effect rows show, updating in real time as messages are processed, without
-needing the Extensions drawer open mid-scene. The wand-menu entry is the easier way to reach it
-on mobile, where scrolling to the settings-panel button is awkward. Drag it anywhere (position
-persists across reloads via SillyTavern's Moving UI); close it with the ✕ or either toolbar
-button. The panel starts closed on each page load. Effects with an `always` trigger aren't
-listed — they're trivially active at level 1, so there's nothing to watch.
-
-### Pausing transforms for one message
-
-Click **Pause next message** in the wand/extensions menu, or run `/mangler-pause`, to skip every
-effect's transform for the next message only (user or character, whichever comes first) — the
-message goes through completely unmangled. Detection, levels, and awareness cues are unaffected;
-this only suppresses the transform, so a progressive effect keeps escalating/decaying normally
-even while paused. It auto-clears after that one message — run `/mangler-pause state=off` to
-cancel a pending pause without waiting for it to consume itself.
-
-### Slash commands
-
-- `/mangler-toggle <effect label> [state=on|off]` — enable/disable an effect by label without
-  opening the settings panel. Omitting `state` toggles the current value.
-- `/mangler-pause [state=on|off]` — see above.
-
-### Debug logging
-
-There's a `debug` setting with no UI control — enable it from the browser console when you need
-to trace exactly what the pipeline is doing for a message (current level per effect, whether the
-trigger threshold was reached, whether a rewrite actually happened, detector batching, etc.),
-including the full text of every prompt actually sent to your connected model (llm-rewrite,
-batched LLM detection, and the Test panel's detection check):
-
-```js
-const ctx = SillyTavern.getContext();
-ctx.extensionSettings.st_message_mangler.debug = true;
-ctx.saveSettingsDebounced();
-```
-
-Once enabled, every relevant decision point logs to the console under
-`[message-mangler] [debug]`, filterable by that prefix. Set it back to `false` the same way when
-you're done — it persists across reloads like any other setting.
+## Configuring an effect
 
 ### Effect types
 
@@ -132,7 +93,7 @@ you're done — it persists across reloads like any other setting.
 |---|---|
 | **Regex replace** | Deterministic find/replace (JS regex, `$1` backreferences work). |
 | **Drunk mangle** | Algorithmic character-level mangling (random letter doubling + trailing elongation), scaled by intensity. |
-| **LLM rewrite** | Sends the message to your currently-connected model with a custom prompt template and replaces it with the response. Needed for transforms regex can't express — e.g. "make the speaker compulsively profess love of trees" — since that's a rewrite of meaning, not a substitution. |
+| **LLM rewrite** | Sends the message to your currently-connected model with a custom prompt template and replaces it with the response. Needed for transforms regex can't express — e.g. "let a character's buried religious conviction creep into their dialogue" — since that's a rewrite of meaning, not a substitution. |
 | **No transform (detect/track only)** | Doesn't touch the message at all — use it when you only want the trigger/detection engine (keyword or LLM evidence → level → escalation/decay) to drive an awareness cue or the floating status panel, without mangling any text. The Target field is hidden since there's nothing to apply a transform to. |
 
 **LLM rewrite** prompt templates support these placeholders: `{{original}}` (the text so far in
@@ -196,9 +157,9 @@ Example:
 
 
 ```
-Rewrite the message below so the speaker can't help professing their love of trees, however
-unrelated the topic, at escalation strength {{level}} (0 = no change, 1 = extreme). Preserve
-the speaker's original intent and voice otherwise.
+Rewrite the message below so the speaker's words increasingly betray genuine religious
+conviction breaking through old skepticism, at strength {{level}} (0 = outwardly skeptical,
+1 = openly devout). Preserve the speaker's original intent and voice otherwise.
 
 Original message:
 {{original}}
@@ -263,8 +224,8 @@ security boundary.
   - **LLM classification** — asks your connected model to rate (0–10) how strongly a condition
     you describe in the **Condition to detect** field currently applies, based on the last N
     messages ("LLM lookback"). Write this as a plain-language description of what the model
-    should judge, e.g. "the speaker is under a magical compulsion to talk about trees" — a vague
-    label like "Tree Spell" alone gives the classifier little to work with. Runs in the
+    should judge, e.g. "the speaker is being visibly swayed by religious testimony they're
+    hearing" — a vague label like "Faith Cracks" alone gives the classifier little to work with. Runs in the
     background (fire-and-forget), so it never blocks sending — the level updates a moment after
     classification returns, lagging by roughly one turn. (The **Keywords** field only applies to
     keyword-match detection and is hidden while LLM classification is selected.)
@@ -377,6 +338,31 @@ currently-unmet prerequisite (one line per issue, when there's more than one). D
 importing an effect never carries its dependencies over — a copy always starts with none, so it
 can't accidentally point at the wrong effect.
 
+### Worked examples: resting level, hit direction, and dependencies together
+
+These fields compose in ways that aren't obvious from the field descriptions alone — a few
+concrete scenarios:
+
+- **"Fresh wound"** — intense the instant it happens, then fades. Resting level **Low**, Hit
+  direction **Increase**, Hit behavior **Jump**, keywords `stabbed, wounded, struck`. A matching
+  keyword sends the level straight to `1.00` on that turn (not a gradual build), then **Decay per
+  turn** pulls it back down toward `0` on quiet turns afterward.
+- **"Eroding trust"** — starts high, collapses under pressure, recovers if left alone. Resting
+  level **High**, Hit direction **Decrease**, Hit behavior **Gradual**, keywords
+  `lied, betrayed, broke his promise`. The level starts at `1.00` and *drops* by **Increment per
+  hit** on a match instead of rising. **Min level to apply** is mirrored for a Decrease effect —
+  set it to `0.8` and the effect activates once trust has fallen to `0.2` or below (80% of the way
+  toward full collapse), not once it's risen to `0.8`.
+- **"Confession gated by trust and tension"** — two progressive effects, `Trust` and `Tension`,
+  each escalating independently from their own keywords/LLM condition. A third effect,
+  `Confession`, has *two* Dependency-tab rows: `Trust` at Min level `0.6` and `Tension` at Min
+  level `0.6`. `Confession`'s own level can't rise until **both** are satisfied — either one
+  alone leaves it blocked, and the status line names whichever is still short.
+- **"Rating magnitude scaling"** — an LLM-classified effect in Cumulative mode, Hit threshold
+  `5`, **Scale by rating magnitude** on. A rating of `5.5` (just past threshold) applies only a
+  small fraction of **Increment per hit**; a rating of `10` applies the full amount. Without this
+  toggle, `5.5` and `10` would move the level identically.
+
 Multiple progressive effects using `llm` detection are batched into a **single** classification
 call per message (one prompt rating every due effect at once) rather than one call each — see
 "Max LLM calls per message" above for the overall cap.
@@ -389,15 +375,67 @@ the pipeline fails open. Every LLM call
 behavior, absorbing occasional transient connection hiccups without any visible effect on
 success — only a genuinely persistent failure reaches the fail-open path.
 
-### Example effects
+## Day-to-day tools
+
+### Floating status panel
+
+Click **Status panel** (next to Collapse all in the extension's settings), or **Mangler status**
+in the wand/extensions menu next to the chat input, to open a small draggable overlay listing
+every enabled progressive effect with its live level and lock state — the same 🔒/●/○ + level
+badge the collapsed effect rows show, updating in real time as messages are processed, without
+needing the Extensions drawer open mid-scene. The wand-menu entry is the easier way to reach it
+on mobile, where scrolling to the settings-panel button is awkward. Drag it anywhere (position
+persists across reloads via SillyTavern's Moving UI); close it with the ✕ or either toolbar
+button. The panel starts closed on each page load. Effects with an `always` trigger aren't
+listed — they're trivially active at level 1, so there's nothing to watch.
+
+### Pausing transforms for one message
+
+Click **Pause next message** in the wand/extensions menu, or run `/mangler-pause`, to skip every
+effect's transform for the next message only (user or character, whichever comes first) — the
+message goes through completely unmangled. Detection, levels, and awareness cues are unaffected;
+this only suppresses the transform, so a progressive effect keeps escalating/decaying normally
+even while paused. It auto-clears after that one message — run `/mangler-pause state=off` to
+cancel a pending pause without waiting for it to consume itself.
+
+### Slash commands
+
+- `/mangler-toggle <effect label> [state=on|off]` — enable/disable an effect by label without
+  opening the settings panel. Omitting `state` toggles the current value.
+- `/mangler-pause [state=on|off]` — see above.
+
+### Debug logging
+
+There's a `debug` setting with no UI control — enable it from the browser console when you need
+to trace exactly what the pipeline is doing for a message (current level per effect, whether the
+trigger threshold was reached, whether a rewrite actually happened, detector batching, etc.),
+including the full text of every prompt actually sent to your connected model (llm-rewrite,
+batched LLM detection, and the Test panel's detection check):
+
+```js
+const ctx = SillyTavern.getContext();
+ctx.extensionSettings.st_message_mangler.debug = true;
+ctx.saveSettingsDebounced();
+```
+
+Once enabled, every relevant decision point logs to the console under
+`[message-mangler] [debug]`, filterable by that prefix. Set it back to `false` the same way when
+you're done — it persists across reloads like any other setting.
+
+## Example effects
 
 | Label | Type | Trigger | Config |
 |---|---|---|---|
 | green→red | Regex replace | Always | pattern `\bgreen\b`, flags `gi`, replacement `red` |
 | Bar scene drunk | Drunk mangle | Progressive, keyword (`drink, beer, shot, bar, tipsy`) | intensity 0.5 |
-| Tree spell | LLM rewrite | Progressive, keyword (`spell, cast, curse`) | prompt template above |
+| Faith cracks | LLM rewrite | Progressive, keyword (`pray, prayer, scripture, rite, ritual, worship`) | prompt template above |
 
-### FAQ
+`examples/faith-conversion-lorebook.json` is a matching World Info entry for the "Faith cracks"
+row above — import it via SillyTavern's World Info panel, attach it to a chat, and pair it with an
+effect configured like the table row to see the mechanic end to end (lorebook establishes *why*
+the compulsion exists narratively; the effect is what actually enforces it turn to turn).
+
+## FAQ
 
 A few concept pairs that sound similar but mean different things, collected in one place:
 
@@ -429,7 +467,7 @@ A few concept pairs that sound similar but mean different things, collected in o
   the matching one in code, handing the model only the resolved text via `{{scale_instruction}}`
   — no numeral interpretation involved in band selection at all.
 
-### Troubleshooting
+## Troubleshooting
 
 Real issues hit (and fixed) while building this extension against local models — if you're
 seeing one of these, this is likely why.
@@ -442,7 +480,7 @@ seeing one of these, this is likely why.
   backend have been observed to break SillyTavern's send flow entirely on some setups (especially
   local single-worker backends). The extension already serializes these two calls when both are
   active on the same message — if you're still seeing this, it may be a different concurrency
-  path; enable **Debug logging** (below) and check the console.
+  path; enable [Debug logging](#debug-logging) and check the console.
 - **LLM classification (progressive triggers) never detects anything, or always returns
   nothing.** If your connected model does explicit reasoning before answering, a
   JSON-schema-constrained response format can starve it of room to think and come back empty.
