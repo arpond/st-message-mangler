@@ -69,6 +69,10 @@ async function importEffectsFromFile(file, settings) {
             const effect = { ...imported, id: `effect_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` };
             backfillDefaults(effect, defaultEffectShape(effect.type), warn);
             sanitizeScaleSteps(effect.llmRewrite.scaleSteps, warn);
+            // Never import a dependency reference — it almost certainly points at a foreign id
+            // that doesn't exist in this settings' effects list (or, worse, coincidentally
+            // collides with an unrelated existing effect and silently links to the wrong one).
+            effect.trigger.dependsOnEffectId = '';
             settings.effects.push(effect);
         }
         refreshEffectList(settings);
@@ -389,6 +393,7 @@ export function addSettingsUI() {
         const index = settings.effects.findIndex(e => e.id === id);
         if (index === -1) return;
         const copy = { ...structuredClone(settings.effects[index]), id: `effect_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` };
+        copy.trigger.dependsOnEffectId = ''; // never inherit a dependency — could point at the wrong effect after copying
         settings.effects.splice(index + 1, 0, copy); // inserted right after the original
         expandedEffectIds.add(copy.id); // opens expanded, same convention as a newly-added effect
         refreshEffectList(settings);
@@ -533,8 +538,11 @@ export function addSettingsUI() {
         }
 
         // Type, trigger.mode, trigger.detector, or trigger.llmIntegrationMode changes swap
-        // visible sub-fields — full row re-render needed.
-        if (fieldPath === 'type' || fieldPath === 'trigger.mode' || fieldPath === 'trigger.detector' || fieldPath === 'trigger.llmIntegrationMode' || fieldPath === 'llmRewrite.scaleMode') {
+        // visible sub-fields — full row re-render needed. trigger.dependsOnEffectId also needs
+        // it: picking/clearing a dependency shows/hides the min-level field and the
+        // broken/blocked status line, and every OTHER effect's own dependency picker needs its
+        // cycle-safe option list re-evaluated as the graph changes.
+        if (fieldPath === 'type' || fieldPath === 'trigger.mode' || fieldPath === 'trigger.detector' || fieldPath === 'trigger.llmIntegrationMode' || fieldPath === 'llmRewrite.scaleMode' || fieldPath === 'trigger.dependsOnEffectId') {
             refreshEffectList(settings);
         } else if (fieldPath === 'enabled' || fieldPath === 'label') {
             // Header-row edits that don't re-render the effect list but do change what the

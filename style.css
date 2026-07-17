@@ -177,6 +177,11 @@
     font-weight: 600;
 }
 
+.st_mangler_dependency_warning {
+    color: var(--warning, #d9822b);
+    cursor: help;
+}
+
 .st_mangler_info_icon {
     opacity: 0.6;
     cursor: help;
@@ -224,6 +229,14 @@
     align-items: center;
     gap: 0.5em;
     margin: 0.2em 0;
+}
+
+#st_mangler_status_panel .st_mangler_status_set_level {
+    /* .text_pole defaults to width:100%, which in this flex row fights the label (flex:1) for
+       space and can squeeze it down to nothing — pin this to a small fixed width instead. */
+    flex: 0 0 auto;
+    width: 4em !important;
+    margin: 0;
 }
 
 #st_mangler_status_panel .st_mangler_status_row_label {

@@ -1,7 +1,9 @@
-import { getEffectLevel, getEffectTurnsActive, getEffectLocked, effectStatusBadgeHtml } from './lib/chatState.js';
+import {
+    getEffectLevel, getEffectTurnsActive, getEffectLocked, effectStatusBadgeHtml, describeDependencyState,
+} from './lib/chatState.js';
 import { escapeHtmlForDisplay } from './lib/pure.js';
 import {
-    infoIcon, field, renderTriggerPanel, renderTypeFields, renderTestPanel, EFFECT_TYPE_LABELS, EFFECT_TABS,
+    infoIcon, field, renderTriggerPanel, renderDependencyPanel, renderTypeFields, renderTestPanel, EFFECT_TYPE_LABELS, EFFECT_TABS,
 } from './lib/render.js';
 
 // Session-only (not persisted to settings) — which effect rows are currently expanded. Purely
@@ -13,13 +15,14 @@ export const expandedEffectIds = new Set();
 // Defaults to 'basics' for any effect with no entry (new/duplicated effects included).
 export const effectActiveTab = new Map();
 
-export function renderEffectRow(effect) {
+export function renderEffectRow(effect, allEffects = [effect]) {
     const expanded = expandedEffectIds.has(effect.id);
     const activeTab = effectActiveTab.get(effect.id) ?? 'basics';
     const tabStrip = EFFECT_TABS.map(tab => `
         <div class="st_mangler_tab_btn ${tab.id === activeTab ? 'active' : ''}" data-tab="${tab.id}">${tab.label}</div>`).join('');
     const pane = (id, html) => `
         <div class="st_mangler_tab_pane" data-tab="${id}" style="display: ${id === activeTab ? 'block' : 'none'};">${html}</div>`;
+    const dependencyState = describeDependencyState(effect, allEffects);
     return `
         <div class="st_mangler_effect" data-effect-id="${effect.id}">
             <div class="flex-container alignItemsCenter st_mangler_effect_header">
@@ -29,6 +32,7 @@ export function renderEffectRow(effect) {
                 <input type="checkbox" class="st_mangler_field" data-field="enabled" ${effect.enabled ? 'checked' : ''} title="Enabled" />
                 <input type="text" class="text_pole st_mangler_field st_mangler_effect_title_input" data-field="label" value="${escapeHtmlForDisplay(effect.label)}" placeholder="(unlabeled)" title="Effect label" />
                 <span class="st_mangler_effect_summary_type">${EFFECT_TYPE_LABELS[effect.type] ?? effect.type}</span>
+                ${dependencyState ? `<i class="fa-solid fa-triangle-exclamation st_mangler_dependency_warning" title="${escapeHtmlForDisplay(dependencyState.reason)}"></i>` : ''}
                 ${effectStatusBadgeHtml(effect)}
                 <div class="menu_button menu_button_icon st_mangler_effect_move_up" title="Move up"><i class="fa-solid fa-arrow-up"></i></div>
                 <div class="menu_button menu_button_icon st_mangler_effect_move_down" title="Move down"><i class="fa-solid fa-arrow-down"></i></div>
@@ -78,6 +82,7 @@ export function renderEffectRow(effect) {
                         </select>
                     </label>
                     ${renderTriggerPanel(effect, getEffectLevel(effect), getEffectTurnsActive(effect), getEffectLocked(effect))}`)}
+                ${pane('dependency', renderDependencyPanel(effect, allEffects, dependencyState))}
                 ${pane('behavior', renderTypeFields(effect))}
                 ${pane('test', renderTestPanel(effect))}
             </div>
@@ -86,5 +91,5 @@ export function renderEffectRow(effect) {
 
 export function renderEffectList(settings) {
     if (settings.effects.length === 0) return '<i>No effects yet. Click "Add effect" below.</i>';
-    return settings.effects.map(renderEffectRow).join('');
+    return settings.effects.map(effect => renderEffectRow(effect, settings.effects)).join('');
 }

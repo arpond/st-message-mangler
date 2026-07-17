@@ -6,6 +6,12 @@ successive rounds of development.
 
 ## v30
 
+- **Effect dependency** — a new "Depends on effect" + "Min level required" pair in its own
+  Dependency tab blocks one effect's level from increasing until another effect reaches a
+  threshold level (decay/dispel still work normally while blocked). The dependency picker
+  excludes any choice that would form a cycle. A broken reference (the dependency effect was
+  deleted) fails open rather than permanently blocking, with a caution icon + tooltip explaining
+  why. Duplicating or importing an effect never carries its dependency over — always starts clean.
 - **Manually set an effect's level directly** — a new "Set level" field/button in the settings
   panel's Trigger tab and on each row of the floating status panel jumps straight to an
   author-chosen level, instead of only being able to dispel to 0. Resets turns-active/locked the

@@ -310,6 +310,22 @@ security boundary.
     rating locks an effect. The floating status panel has the same control per effect row, for
     setting a level without opening the settings panel mid-scene.
 
+### Effect dependency
+
+The **Dependency** tab (separate from Trigger) has a **Depends on effect** field (optional,
+"None" by default) that blocks this effect's level from *increasing* until another effect's
+level reaches **Min level required**. Decay/dispel still work normally while blocked — only
+escalation is paused ("Swings freely" mode has no separate decay step, so it just holds its
+current level instead). Useful for chaining effects: e.g. a "trust" effect that has to build up
+before a "confession" effect can even start escalating. Only applies to progressive effects — the
+tab shows a note instead of the fields for `always`-mode effects, which have nothing to gate. The
+picker excludes any effect that would create a dependency cycle, so one can't be formed by
+accident. If the referenced effect is later deleted, the dependency is treated as if it weren't
+set (fails open, doesn't permanently block the effect) — a caution icon on the collapsed row and
+a status line in the Dependency tab explain why, whether it's a broken reference or just a
+currently-unmet prerequisite. Duplicating or importing an effect never carries its dependency
+over — a copy always starts with "None", so it can't accidentally point at the wrong effect.
+
 Multiple progressive effects using `llm` detection are batched into a **single** classification
 call per message (one prompt rating every due effect at once) rather than one call each — see
 "Max LLM calls per message" above for the overall cap.

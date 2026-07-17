@@ -8,7 +8,7 @@ import {
     buildRespondingToContext, buildSceneContext,
     defaultTrigger, defaultEffectShape, defaultEffect, DEFAULT_SETTINGS, migrateLegacySettings,
     wrapUntrusted, INJECTION_GUARD, withTimeout, extractRating, resolveLlmRatingUpdate,
-    resolveDetectionLevelUpdate, buildChainPreservationNote,
+    resolveDetectionLevelUpdate, buildChainPreservationNote, wouldCreateCycle,
 } from '../lib/pure.js';
 
 test('clamp01 clamps to [0, 1]', () => {
@@ -543,4 +543,59 @@ test('buildChainPreservationNote returns a preserve-existing-changes instruction
     const note = buildChainPreservationNote('hello', 'hellooo (mangled)');
     assert.match(note, /preserve/i);
     assert.match(note, /existing changes/i);
+});
+
+function fx(id, dependsOnEffectId = '') {
+    return { id, trigger: { dependsOnEffectId } };
+}
+
+test('wouldCreateCycle detects a direct cycle (A depends on B, B would depend on A)', () => {
+    const effects = [fx('a'), fx('b', 'a')];
+    assert.equal(wouldCreateCycle(effects, 'a', 'b'), true);
+});
+
+test('wouldCreateCycle detects a longer chain (A -> B -> C -> A)', () => {
+    const effects = [fx('a'), fx('b', 'c'), fx('c', 'a')];
+    assert.equal(wouldCreateCycle(effects, 'a', 'b'), true);
+});
+
+test('wouldCreateCycle flags depending on self', () => {
+    const effects = [fx('a')];
+    assert.equal(wouldCreateCycle(effects, 'a', 'a'), true);
+});
+
+test('wouldCreateCycle allows a non-cyclic dependency', () => {
+    const effects = [fx('a'), fx('b'), fx('c', 'b')];
+    assert.equal(wouldCreateCycle(effects, 'a', 'c'), false);
+});
+
+test('wouldCreateCycle does not treat a dangling reference mid-chain as a cycle', () => {
+    const effects = [fx('a'), fx('b', 'missing')];
+    assert.equal(wouldCreateCycle(effects, 'a', 'b'), false);
+});
+
+test('resolveDetectionLevelUpdate: unmet prerequisite treats a keyword hit as a no-hit (still decays)', () => {
+    const trigger = { ...defaultTrigger(), detector: 'keyword', keywords: 'tree', incrementPerHit: 0.3, decayPerTurn: 0.05, minLevelToApply: 0.05 };
+    // Level (0.2 - 0.05 = 0.15) is still >= minLevelToApply, so turnsActive still increments
+    // normally — being blocked only suppresses the increment itself, not activity tracking.
+    assert.deepEqual(
+        resolveDetectionLevelUpdate(0.2, 0, 'a tree grows here', trigger, false),
+        { level: 0.2 - 0.05, turnsActive: 1, dispelled: false, autoDispelled: false },
+    );
+});
+
+test('resolveLlmRatingUpdate: unmet prerequisite treats a cumulative hit as a no-hit (still decays)', () => {
+    const trigger = { ...defaultTrigger(), llmIntegrationMode: 'cumulative', llmHitThreshold: 5, incrementPerHit: 0.3, decayPerTurn: 0.05 };
+    assert.deepEqual(
+        resolveLlmRatingUpdate(0.2, false, 7, trigger, false),
+        { level: 0.2 - 0.05, locked: false },
+    );
+});
+
+test('resolveLlmRatingUpdate: unmet prerequisite freezes absolute mode instead of applying the rating', () => {
+    const trigger = { ...defaultTrigger(), llmIntegrationMode: 'absolute' };
+    assert.deepEqual(
+        resolveLlmRatingUpdate(0.4, false, 9, trigger, false),
+        { level: 0.4, locked: false },
+    );
 });

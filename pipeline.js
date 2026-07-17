@@ -4,7 +4,7 @@ import { log, warn } from './lib/log.js';
 import { getSettings, debugLog } from './lib/settings.js';
 import {
     getEffectLevel, setEffectLevel, getEffectTurnsActive, setEffectTurnsActive, getEffectLocked, setEffectLocked,
-    consumeTransformPaused,
+    consumeTransformPaused, isPrerequisiteMet,
 } from './lib/chatState.js';
 import { runBatchedLlmDetectors, runLlmRewrite } from './lib/llmClient.js';
 import {
@@ -31,10 +31,10 @@ function shouldDetectFromSource(effect, source) {
 // suffix (see splitContinuationSuffix), so keyword/dispel matching here only ever sees new
 // content instead of re-matching (and re-incrementing on) a keyword that already hit in an
 // earlier, already-mangled portion of the same message.
-function updateAndGetEffectLevel(effect, detectionText) {
-    debugLog(`updateAndGetEffectLevel "${effect.label}": detector=${effect.trigger.detector}, levelBefore=${getEffectLevel(effect).toFixed(2)}`);
+function updateAndGetEffectLevel(effect, detectionText, prerequisiteMet) {
+    debugLog(`updateAndGetEffectLevel "${effect.label}": detector=${effect.trigger.detector}, levelBefore=${getEffectLevel(effect).toFixed(2)}${prerequisiteMet ? '' : ' (blocked — dependency not met)'}`);
 
-    const result = resolveDetectionLevelUpdate(getEffectLevel(effect), getEffectTurnsActive(effect), detectionText, effect.trigger);
+    const result = resolveDetectionLevelUpdate(getEffectLevel(effect), getEffectTurnsActive(effect), detectionText, effect.trigger, prerequisiteMet);
 
     if (result.dispelled) {
         setEffectTurnsActive(effect, 0);
@@ -142,10 +142,10 @@ export async function applyEffects(originalText, message, settings, source, isCo
             const hasRewriteEffect = settings.effects.some(e => e.enabled && e.type === 'llm-rewrite' && effectAppliesToTarget(e, source));
             if (hasRewriteEffect) {
                 debugLog(`applyEffects: awaiting LLM detector batch for ${dueLlmDetectors.length} effect(s) (serialized — an llm-rewrite effect is active this message), budget remaining after=${budget.remaining}`);
-                await runBatchedLlmDetectors(dueLlmDetectors);
+                await runBatchedLlmDetectors(dueLlmDetectors, settings.effects);
             } else {
                 debugLog(`applyEffects: firing LLM detector batch for ${dueLlmDetectors.length} effect(s) (background), budget remaining after=${budget.remaining}`);
-                runBatchedLlmDetectors(dueLlmDetectors); // fire-and-forget, once for the whole message
+                runBatchedLlmDetectors(dueLlmDetectors, settings.effects); // fire-and-forget, once for the whole message
             }
         } else {
             warn(`Skipping LLM detector batch (${dueLlmDetectors.length} effect(s)) — LLM call budget (${settings.maxLlmCallsPerMessage}) exhausted for this message.`);
@@ -176,7 +176,7 @@ export async function applyEffects(originalText, message, settings, source, isCo
         const level = effect.trigger.mode === 'always'
             ? 1
             : shouldDetectFromSource(effect, source)
-                ? updateAndGetEffectLevel(effect, originalText)
+                ? updateAndGetEffectLevel(effect, originalText, isPrerequisiteMet(effect, settings.effects))
                 : getEffectLevel(effect);
         const trend = effect.trigger.mode === 'always' ? 'steady' : resolveLevelTrend(previousLevel, level);
 

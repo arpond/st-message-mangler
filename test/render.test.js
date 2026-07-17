@@ -1,7 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { defaultEffect, defaultEffectShape } from '../lib/pure.js';
-import { infoIcon, field, renderTriggerPanel, renderTypeFields, renderTestPanel, EFFECT_TYPE_LABELS } from '../lib/render.js';
+import {
+    infoIcon, field, renderTriggerPanel, renderDependencyPanel, renderTypeFields, renderTestPanel, EFFECT_TYPE_LABELS,
+} from '../lib/render.js';
 
 test('infoIcon renders a title-bearing icon with the given text', () => {
     assert.match(infoIcon('hello & world'), /title="hello &amp; world"/);
@@ -87,4 +89,48 @@ test('renderTestPanel still shows the level slider and Run test for other types'
     const html = renderTestPanel(defaultEffect('drunk'));
     assert.match(html, /st_mangler_test_level"/);
     assert.match(html, /st_mangler_test_run/);
+});
+
+test('renderDependencyPanel excludes a cycle-forming effect from the dependency picker', () => {
+    const a = defaultEffect('none');
+    a.trigger.mode = 'progressive';
+    const b = defaultEffect('none');
+    b.trigger.dependsOnEffectId = a.id; // b already depends on a, so a depending on b would cycle
+    const html = renderDependencyPanel(a, [a, b]);
+    assert.doesNotMatch(html, new RegExp(`<option value="${b.id}"`));
+});
+
+test('renderDependencyPanel includes a non-cyclic effect in the dependency picker', () => {
+    const a = defaultEffect('none');
+    a.trigger.mode = 'progressive';
+    const b = defaultEffect('none');
+    const html = renderDependencyPanel(a, [a, b]);
+    assert.match(html, new RegExp(`<option value="${b.id}"`));
+});
+
+test('renderDependencyPanel shows the min-level field only when a dependency is set', () => {
+    const a = defaultEffect('none');
+    a.trigger.mode = 'progressive';
+    const b = defaultEffect('none');
+    b.trigger.mode = 'progressive';
+    a.trigger.dependsOnEffectId = b.id;
+    const withDep = renderDependencyPanel(a, [a, b]);
+    assert.match(withDep, /style="display: block;">\s*Min level required:/);
+
+    const withoutDep = renderDependencyPanel(b, [a, b]);
+    assert.match(withoutDep, /style="display: none;">\s*Min level required:/);
+});
+
+test('renderDependencyPanel surfaces a broken-dependency warning when passed a dependencyState', () => {
+    const effect = defaultEffect('none');
+    effect.trigger.mode = 'progressive';
+    const html = renderDependencyPanel(effect, [effect], { broken: true, reason: 'Depends on an effect that no longer exists' });
+    assert.match(html, /no longer exists/);
+});
+
+test('renderDependencyPanel shows a note instead of fields for non-progressive effects', () => {
+    const effect = defaultEffect('none'); // defaultTrigger()'s mode defaults to 'always'
+    const html = renderDependencyPanel(effect, [effect]);
+    assert.match(html, /Only applies to progressive effects/);
+    assert.doesNotMatch(html, /Depends on effect/);
 });
