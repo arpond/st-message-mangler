@@ -100,34 +100,52 @@ test('renderTestPanel still shows the level slider and Run test for other types'
     assert.match(html, /st_mangler_test_run/);
 });
 
-test('renderDependencyPanel excludes a cycle-forming effect from the dependency picker', () => {
+test('renderDependencyPanel excludes a cycle-forming effect from an unselected row\'s picker', () => {
     const a = defaultEffect('none');
     a.trigger.mode = 'progressive';
+    a.trigger.dependencies = [{ effectId: '', minLevel: 0.5 }];
     const b = defaultEffect('none');
-    b.trigger.dependsOnEffectId = a.id; // b already depends on a, so a depending on b would cycle
+    b.trigger.dependencies = [{ effectId: a.id, minLevel: 0.5 }]; // b already depends on a, so a depending on b would cycle
     const html = renderDependencyPanel(a, [a, b]);
     assert.doesNotMatch(html, new RegExp(`<option value="${b.id}"`));
 });
 
-test('renderDependencyPanel includes a non-cyclic effect in the dependency picker', () => {
+test('renderDependencyPanel includes a non-cyclic effect in an unselected row\'s picker', () => {
     const a = defaultEffect('none');
     a.trigger.mode = 'progressive';
+    a.trigger.dependencies = [{ effectId: '', minLevel: 0.5 }];
     const b = defaultEffect('none');
     const html = renderDependencyPanel(a, [a, b]);
     assert.match(html, new RegExp(`<option value="${b.id}"`));
 });
 
-test('renderDependencyPanel shows the min-level field only when a dependency is set', () => {
+test('renderDependencyPanel excludes an effect already chosen in another row of the same effect', () => {
     const a = defaultEffect('none');
     a.trigger.mode = 'progressive';
     const b = defaultEffect('none');
-    b.trigger.mode = 'progressive';
-    a.trigger.dependsOnEffectId = b.id;
-    const withDep = renderDependencyPanel(a, [a, b]);
-    assert.match(withDep, /style="display: block;">\s*Min level required:/);
+    const c = defaultEffect('none');
+    a.trigger.dependencies = [{ effectId: b.id, minLevel: 0.5 }, { effectId: '', minLevel: 0.5 }];
+    const html = renderDependencyPanel(a, [a, b, c]);
+    // b.id should appear once (selected in row 0), not offered again in row 1's picker.
+    const bOptionCount = (html.match(new RegExp(`<option value="${b.id}"`, 'g')) ?? []).length;
+    assert.equal(bOptionCount, 1);
+    assert.match(html, new RegExp(`<option value="${c.id}"`));
+});
 
-    const withoutDep = renderDependencyPanel(b, [a, b]);
-    assert.match(withoutDep, /style="display: none;">\s*Min level required:/);
+test('renderDependencyPanel shows no rows and a hint when there are no dependencies', () => {
+    const effect = defaultEffect('none');
+    effect.trigger.mode = 'progressive';
+    const html = renderDependencyPanel(effect, [effect]);
+    assert.match(html, /escalates freely/);
+});
+
+test('renderDependencyPanel renders a row with the effect\'s min level for each configured dependency', () => {
+    const a = defaultEffect('none');
+    a.trigger.mode = 'progressive';
+    const b = defaultEffect('none');
+    a.trigger.dependencies = [{ effectId: b.id, minLevel: 0.42 }];
+    const html = renderDependencyPanel(a, [a, b]);
+    assert.match(html, /value="0.42"/);
 });
 
 test('renderDependencyPanel surfaces a broken-dependency warning when passed a dependencyState', () => {
@@ -141,5 +159,5 @@ test('renderDependencyPanel shows a note instead of fields for non-progressive e
     const effect = defaultEffect('none'); // defaultTrigger()'s mode defaults to 'always'
     const html = renderDependencyPanel(effect, [effect]);
     assert.match(html, /Only applies to progressive effects/);
-    assert.doesNotMatch(html, /Depends on effect/);
+    assert.doesNotMatch(html, /Dependencies/);
 });

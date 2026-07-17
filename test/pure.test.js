@@ -10,7 +10,7 @@ import {
     wrapUntrusted, INJECTION_GUARD, withTimeout, extractRating, resolveLlmRatingUpdate,
     resolveDetectionLevelUpdate, buildChainPreservationNote, wouldCreateCycle, matchesBoundCharacter,
     resolveChatActiveState, resolveBindableCharacters, restingLevelValue, meetsDirectionalThreshold,
-    resolveHitLevel,
+    resolveHitLevel, migrateEffectDependency,
 } from '../lib/pure.js';
 
 test('clamp01 clamps to [0, 1]', () => {
@@ -383,6 +383,26 @@ test('sanitizeScaleSteps clamps out-of-range thresholds into [0, 1]', () => {
     assert.equal(steps[1].threshold, 1);
 });
 
+test('migrateEffectDependency converts a legacy single dependsOnEffectId into the dependencies array', () => {
+    const trigger = { dependsOnEffectId: 'other', dependsOnMinLevel: 0.7 };
+    migrateEffectDependency(trigger);
+    assert.deepEqual(trigger.dependencies, [{ effectId: 'other', minLevel: 0.7 }]);
+    assert.equal('dependsOnEffectId' in trigger, false);
+    assert.equal('dependsOnMinLevel' in trigger, false);
+});
+
+test('migrateEffectDependency with no legacy dependency defaults to an empty array', () => {
+    const trigger = { dependsOnEffectId: '' };
+    migrateEffectDependency(trigger);
+    assert.deepEqual(trigger.dependencies, []);
+});
+
+test('migrateEffectDependency is a no-op once dependencies is already an array', () => {
+    const trigger = { dependencies: [{ effectId: 'x', minLevel: 0.3 }] };
+    migrateEffectDependency(trigger);
+    assert.deepEqual(trigger.dependencies, [{ effectId: 'x', minLevel: 0.3 }]);
+});
+
 test('sanitizeScaleSteps coerces a non-string text to an empty string', () => {
     const steps = [{ threshold: 0.5, text: null }];
     sanitizeScaleSteps(steps, () => {});
@@ -552,8 +572,8 @@ test('buildChainPreservationNote returns a preserve-existing-changes instruction
     assert.match(note, /existing changes/i);
 });
 
-function fx(id, dependsOnEffectId = '') {
-    return { id, trigger: { dependsOnEffectId } };
+function fx(id, ...dependsOnIds) {
+    return { id, trigger: { dependencies: dependsOnIds.map(effectId => ({ effectId, minLevel: 0.5 })) } };
 }
 
 test('wouldCreateCycle detects a direct cycle (A depends on B, B would depend on A)', () => {
@@ -579,6 +599,15 @@ test('wouldCreateCycle allows a non-cyclic dependency', () => {
 test('wouldCreateCycle does not treat a dangling reference mid-chain as a cycle', () => {
     const effects = [fx('a'), fx('b', 'missing')];
     assert.equal(wouldCreateCycle(effects, 'a', 'b'), false);
+});
+
+test('wouldCreateCycle walks all of a node\'s multiple dependencies, not just one', () => {
+    // c depends on both a and d; d has no dependencies. a depending on c should cycle (via c -> a).
+    const effects = [fx('a'), fx('c', 'a', 'd'), fx('d')];
+    assert.equal(wouldCreateCycle(effects, 'a', 'c'), true);
+    // b depending on c should NOT cycle (c's dependencies never reach b).
+    const effects2 = [fx('b'), fx('c', 'a', 'd'), fx('a'), fx('d')];
+    assert.equal(wouldCreateCycle(effects2, 'b', 'c'), false);
 });
 
 test('resolveDetectionLevelUpdate: unmet prerequisite treats a keyword hit as a no-hit (still decays)', () => {

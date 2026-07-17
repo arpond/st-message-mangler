@@ -4,6 +4,20 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v33
+
+- **Multiple dependencies per effect** — the Dependency tab now supports zero or more
+  dependencies instead of exactly one; when more than one is set, every dependency must clear its
+  own min-level before escalation resumes (AND-gate). Existing single-dependency configurations
+  migrate automatically on load. Each row's picker excludes cycle-forming choices (checked across
+  the whole dependency graph, not just that row) and effects already picked in the same effect's
+  other rows. The broken/blocked status line now lists one line per issue when more than one
+  dependency needs attention.
+- **Fixed**: the dependency-satisfied check compared a prerequisite's level with a raw `>=`,
+  ignoring the prerequisite's own Hit direction (added last version) — a decrease-direction
+  prerequisite (e.g. eroding trust) needs to be satisfied at a *low* level, not high. Now uses the
+  same mirrored-threshold comparison as Min level to apply/Lock threshold.
+
 ## v32
 
 - **Configurable resting level, hit direction, and hit behavior for progressive effects** — three

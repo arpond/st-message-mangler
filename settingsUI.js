@@ -81,7 +81,10 @@ async function importEffectsFromFile(file, settings) {
             // Never import a dependency reference — it almost certainly points at a foreign id
             // that doesn't exist in this settings' effects list (or, worse, coincidentally
             // collides with an unrelated existing effect and silently links to the wrong one).
-            effect.trigger.dependsOnEffectId = '';
+            // Set directly rather than via migrateEffectDependency — an imported file could carry
+            // either the legacy single-field shape or the current dependencies array, and either
+            // way the answer is the same: drop it.
+            effect.trigger.dependencies = [];
             settings.effects.push(effect);
         }
         refreshEffectList(settings);
@@ -402,7 +405,7 @@ export function addSettingsUI() {
         const index = settings.effects.findIndex(e => e.id === id);
         if (index === -1) return;
         const copy = { ...structuredClone(settings.effects[index]), id: `effect_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` };
-        copy.trigger.dependsOnEffectId = ''; // never inherit a dependency — could point at the wrong effect after copying
+        copy.trigger.dependencies = []; // never inherit dependencies — could point at the wrong effect after copying
         // Character binding/chat-activation overrides live in chatMetadata keyed by effect id
         // (see lib/chatState.js), not on the effect object — the copy gets a fresh id above, so
         // it naturally starts unbound/default-active with nothing to strip here.
@@ -491,6 +494,24 @@ export function addSettingsUI() {
         context.saveSettingsDebounced();
     });
 
+    $('#st_mangler_effects').on('click', '.st_mangler_dependency_add', function () {
+        const id = $(this).closest('.st_mangler_effect').data('effect-id');
+        const effect = settings.effects.find(e => e.id === id);
+        if (!effect) return;
+        effect.trigger.dependencies.push({ effectId: '', minLevel: 0.5 });
+        refreshEffectList(settings);
+        context.saveSettingsDebounced();
+    });
+
+    $('#st_mangler_effects').on('click', '.st_mangler_dependency_delete', function () {
+        const id = $(this).closest('.st_mangler_effect').data('effect-id');
+        const effect = settings.effects.find(e => e.id === id);
+        if (!effect) return;
+        effect.trigger.dependencies.splice($(this).data('dep-index'), 1);
+        refreshEffectList(settings);
+        context.saveSettingsDebounced();
+    });
+
     $('#st_mangler_effects').on('click', '.st_mangler_effect_move_up', function () {
         moveEffect(settings, $(this).closest('.st_mangler_effect').data('effect-id'), -1);
         refreshEffectList(settings);
@@ -568,11 +589,13 @@ export function addSettingsUI() {
         }
 
         // Type, trigger.mode, trigger.detector, or trigger.llmIntegrationMode changes swap
-        // visible sub-fields — full row re-render needed. trigger.dependsOnEffectId also needs
-        // it: picking/clearing a dependency shows/hides the min-level field and the
-        // broken/blocked status line, and every OTHER effect's own dependency picker needs its
-        // cycle-safe option list re-evaluated as the graph changes.
-        if (fieldPath === 'type' || fieldPath === 'trigger.mode' || fieldPath === 'trigger.detector' || fieldPath === 'trigger.llmIntegrationMode' || fieldPath === 'llmRewrite.scaleMode' || fieldPath === 'trigger.dependsOnEffectId') {
+        // visible sub-fields — full row re-render needed. A dependency row's effectId pick also
+        // needs it: re-evaluates the broken/blocked status line, and every OTHER effect's own
+        // dependency picker needs its cycle-safe/already-chosen option list re-evaluated as the
+        // graph changes. A dependency row's minLevel doesn't need this (same as before
+        // multi-dependency support — the status line only refreshes on the next natural
+        // re-render, not live on every number tweak).
+        if (fieldPath === 'type' || fieldPath === 'trigger.mode' || fieldPath === 'trigger.detector' || fieldPath === 'trigger.llmIntegrationMode' || fieldPath === 'llmRewrite.scaleMode' || /^trigger\.dependencies\.\d+\.effectId$/.test(fieldPath)) {
             refreshEffectList(settings);
         } else if (fieldPath === 'enabled' || fieldPath === 'label') {
             // Header-row edits that don't re-render the effect list but do change what the

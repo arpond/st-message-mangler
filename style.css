@@ -93,6 +93,17 @@
     min-height: unset;
 }
 
+.st-message-mangler-settings .st_mangler_dependency_row {
+    display: flex;
+    align-items: center;
+    gap: 0.4em;
+    margin: 0.2em 0;
+}
+
+.st-message-mangler-settings .st_mangler_dependency_row select {
+    flex: 1;
+}
+
 .st-message-mangler-settings .st_mangler_scale_gen {
     display: flex;
     align-items: center;

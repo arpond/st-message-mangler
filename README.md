@@ -353,21 +353,25 @@ each time you switch chats.
 Both settings are chat-scoped state (same storage mechanism as level/turns/locked), so they
 persist per chat and travel with that chat's data, not with the effect's global config.
 
-### Effect dependency
+### Effect dependencies
 
-The **Dependency** tab (separate from Trigger) has a **Depends on effect** field (optional,
-"None" by default) that blocks this effect's level from *increasing* until another effect's
-level reaches **Min level required**. Decay/dispel still work normally while blocked — only
+The **Dependency** tab (separate from Trigger) lists zero or more dependencies (empty by
+default) — each blocks this effect's level from *increasing* until the referenced effect's level
+reaches that row's **Min level**. With more than one dependency, *every* row must be satisfied
+(AND-gate) before escalation resumes. Decay/dispel still work normally while blocked — only
 escalation is paused ("Swings freely" mode has no separate decay step, so it just holds its
-current level instead). Useful for chaining effects: e.g. a "trust" effect that has to build up
-before a "confession" effect can even start escalating. Only applies to progressive effects — the
-tab shows a note instead of the fields for `always`-mode effects, which have nothing to gate. The
-picker excludes any effect that would create a dependency cycle, so one can't be formed by
-accident. If the referenced effect is later deleted, the dependency is treated as if it weren't
-set (fails open, doesn't permanently block the effect) — a caution icon on the collapsed row and
-a status line in the Dependency tab explain why, whether it's a broken reference or just a
-currently-unmet prerequisite. Duplicating or importing an effect never carries its dependency
-over — a copy always starts with "None", so it can't accidentally point at the wrong effect.
+current level instead). Useful for chaining effects: e.g. a "confession" effect that needs both
+"trust" and "tension" to clear their own thresholds before it can even start escalating. Only
+applies to progressive effects — the tab shows a note instead of the fields for `always`-mode
+effects, which have nothing to gate. Each row's picker excludes any effect that would create a
+dependency cycle (checked across the whole graph, not just that one row) and any effect already
+picked in one of this effect's *other* rows, so neither can be formed by accident. If a referenced
+effect is later deleted, that one dependency is treated as if it weren't set (fails open — drops
+out of the AND-gate rather than permanently blocking the effect) — a caution icon on the collapsed
+row and a status line in the Dependency tab explain why, whether it's a broken reference or just a
+currently-unmet prerequisite (one line per issue, when there's more than one). Duplicating or
+importing an effect never carries its dependencies over — a copy always starts with none, so it
+can't accidentally point at the wrong effect.
 
 Multiple progressive effects using `llm` detection are batched into a **single** classification
 call per message (one prompt rating every due effect at once) rather than one call each — see
