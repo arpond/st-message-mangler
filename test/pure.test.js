@@ -9,6 +9,7 @@ import {
     defaultTrigger, defaultEffectShape, defaultEffect, DEFAULT_SETTINGS, migrateLegacySettings,
     wrapUntrusted, INJECTION_GUARD, withTimeout, extractRating, resolveLlmRatingUpdate,
     resolveDetectionLevelUpdate, buildChainPreservationNote, wouldCreateCycle, matchesBoundCharacter,
+    resolveChatActiveState, resolveBindableCharacters,
 } from '../lib/pure.js';
 
 test('clamp01 clamps to [0, 1]', () => {
@@ -600,23 +601,57 @@ test('resolveLlmRatingUpdate: unmet prerequisite freezes absolute mode instead o
     );
 });
 
-test('matchesBoundCharacter: unbound effect matches any character', () => {
-    const effect = defaultEffect('none');
-    assert.equal(matchesBoundCharacter(effect, 'character', 'alice.png'), true);
-    assert.equal(matchesBoundCharacter(effect, 'character', 'bob.png'), true);
+test('matchesBoundCharacter: unbound (empty) matches any character', () => {
+    assert.equal(matchesBoundCharacter('', 'character', 'alice.png'), true);
+    assert.equal(matchesBoundCharacter('', 'character', 'bob.png'), true);
 });
 
 test('matchesBoundCharacter: user-source always matches regardless of binding', () => {
-    const effect = defaultEffect('none');
-    effect.characterAvatar = 'alice.png';
-    assert.equal(matchesBoundCharacter(effect, 'user', 'bob.png'), true);
-    assert.equal(matchesBoundCharacter(effect, 'user', null), true);
+    assert.equal(matchesBoundCharacter('alice.png', 'user', 'bob.png'), true);
+    assert.equal(matchesBoundCharacter('alice.png', 'user', null), true);
 });
 
-test('matchesBoundCharacter: bound effect only matches its own character', () => {
-    const effect = defaultEffect('none');
-    effect.characterAvatar = 'alice.png';
-    assert.equal(matchesBoundCharacter(effect, 'character', 'alice.png'), true);
-    assert.equal(matchesBoundCharacter(effect, 'character', 'bob.png'), false);
-    assert.equal(matchesBoundCharacter(effect, 'character', null), false);
+test('matchesBoundCharacter: bound avatar only matches its own character', () => {
+    assert.equal(matchesBoundCharacter('alice.png', 'character', 'alice.png'), true);
+    assert.equal(matchesBoundCharacter('alice.png', 'character', 'bob.png'), false);
+    assert.equal(matchesBoundCharacter('alice.png', 'character', null), false);
+});
+
+test('resolveChatActiveState: auto mode with no override is active', () => {
+    assert.equal(resolveChatActiveState('auto', undefined), true);
+});
+
+test('resolveChatActiveState: auto mode with an off override is inactive', () => {
+    assert.equal(resolveChatActiveState('auto', false), false);
+});
+
+test('resolveChatActiveState: manual mode with no override is inactive', () => {
+    assert.equal(resolveChatActiveState('manual', undefined), false);
+});
+
+test('resolveChatActiveState: manual mode with an on override is active', () => {
+    assert.equal(resolveChatActiveState('manual', true), true);
+});
+
+test('resolveBindableCharacters: group chat returns only that group\'s members', () => {
+    const characters = [{ avatar: 'alice.png' }, { avatar: 'bob.png' }, { avatar: 'carol.png' }];
+    const groups = [{ id: 'g1', members: ['alice.png', 'carol.png'] }];
+    assert.deepEqual(resolveBindableCharacters(characters, 'g1', groups, 0), [
+        { avatar: 'alice.png' }, { avatar: 'carol.png' },
+    ]);
+});
+
+test('resolveBindableCharacters: unresolvable groupId falls back to the full roster', () => {
+    const characters = [{ avatar: 'alice.png' }, { avatar: 'bob.png' }];
+    assert.deepEqual(resolveBindableCharacters(characters, 'ghost-group', [], undefined), characters);
+});
+
+test('resolveBindableCharacters: regular chat returns only the one active character', () => {
+    const characters = [{ avatar: 'alice.png' }, { avatar: 'bob.png' }];
+    assert.deepEqual(resolveBindableCharacters(characters, undefined, [], 1), [{ avatar: 'bob.png' }]);
+});
+
+test('resolveBindableCharacters: no group and no resolvable characterId falls back to the full roster', () => {
+    const characters = [{ avatar: 'alice.png' }, { avatar: 'bob.png' }];
+    assert.deepEqual(resolveBindableCharacters(characters, undefined, [], undefined), characters);
 });

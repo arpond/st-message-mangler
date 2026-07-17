@@ -4,6 +4,25 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v31
+
+- **Per-chat activation and character binding** — replaces v30's global "Bound character" field.
+  Effects stay globally defined, but whether an effect runs in a given chat, and which character
+  it's bound to there, are now configured **per chat** from the floating status panel instead of
+  globally on the effect — so the same effect can be active-and-bound-to-one-character in one
+  chat and off (or bound to someone else) in another, without reconfiguring it each time. The
+  effect editor keeps a global "Chat activation" default (active-everywhere vs.
+  inactive-until-turned-on), overridable per chat; the status panel gained an active checkbox
+  (with a reset-to-default icon) and a character-binding picker per enabled effect, scoped to who
+  can actually speak in the current chat. Same fail-open behavior as before if a bound character
+  is later deleted.
+- **Fixed**: `context.characterId`/`context.groupId`/`context.groups` were being read from the
+  extension's module-load-time cached `context` object, which goes stale the moment you switch
+  chats afterward (same bug class as the already-fixed `context.chatMetadata` caching hazard) —
+  this made character-binding pickers silently fall back to listing the whole install's roster
+  instead of scoping to the current chat/group. Now read live via new
+  `getCurrentCharacterId()`/`getCurrentGroupId()`/`getCurrentGroups()` helpers.
+
 ## v30
 
 - **Group-chat-aware character binding** — a new "Bound character" field (Basics tab) locks an

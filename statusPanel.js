@@ -4,36 +4,64 @@ import { context } from './lib/context.js';
 import { getSettings } from './lib/settings.js';
 import {
     effectStatusBadgeHtml, getEffectLevel, setEffectLevel, setEffectTurnsActive, setEffectLocked, setTransformPaused,
+    getEffectChatBinding, setEffectChatBinding, getEffectChatActiveOverride, setEffectChatActiveOverride,
 } from './lib/chatState.js';
-import { escapeHtmlForDisplay } from './lib/pure.js';
+import { escapeHtmlForDisplay, resolveChatActiveState } from './lib/pure.js';
+import { bindableCharacters } from './lib/characterUtils.js';
 
 // ---- Floating status panel ----
 // A small draggable overlay (standard ST popout pattern: .draggable div in #movingDivs, position
-// persisted via power_user.movingUIState under the element id) showing every enabled progressive
-// effect's live level/lock state without opening the Extensions drawer. Rows embed the exact same
-// effectStatusBadgeHtml markup as the collapsed effect rows, so refreshEffectStatusBadge's
-// class+data-effect-id .replaceWith() keeps both locations live with no extra call sites.
-// Open state is session-only (like expandedEffectIds) — the panel starts closed on reload.
+// persisted via power_user.movingUIState under the element id) showing every enabled effect's
+// live per-chat state (active/bound-character/level) without opening the Extensions drawer. Rows
+// embed the exact same effectStatusBadgeHtml markup as the collapsed effect rows, so
+// refreshEffectStatusBadge's class+data-effect-id .replaceWith() keeps both locations live with
+// no extra call sites. Open state is session-only (like expandedEffectIds) — the panel starts
+// closed on reload.
+//
+// Lists every enabled effect, not just 'progressive' ones — per-chat activation and character
+// binding matter for 'always'-mode effects too (only the level-set input is progressive-only).
 
-// Bound-character name suffix on the row label — without this, several duplicated effects bound
-// to different characters (the documented "one effect per character" workflow) show up as
-// visually-identical rows with no way to tell which is which beyond the label text itself.
-function boundCharacterSuffix(effect) {
-    if (!effect.characterAvatar) return '';
-    const character = context.characters.find(c => c.avatar === effect.characterAvatar);
-    return character ? ` (${escapeHtmlForDisplay(character.name)})` : ' (deleted character)';
+function bindCharacterOptionsHtml(effect) {
+    const boundAvatar = getEffectChatBinding(effect);
+    const options = [...bindableCharacters()]; // copy — bindableCharacters can return context.characters by reference, never mutate it
+    // Keep the currently-bound character visible even if it's not in this group (e.g. bound
+    // while a different group was active) — a valid-but-filtered-out value shouldn't look like
+    // it silently reset to "Any character".
+    const selectedElsewhere = boundAvatar
+        && !options.some(c => c.avatar === boundAvatar)
+        && context.characters.find(c => c.avatar === boundAvatar);
+    if (selectedElsewhere) options.push(selectedElsewhere);
+    const optionsHtml = options.map(c => `<option value="${c.avatar}" ${boundAvatar === c.avatar ? 'selected' : ''}>${escapeHtmlForDisplay(c.name)}</option>`).join('');
+    const warning = boundAvatar && !context.characters.some(c => c.avatar === boundAvatar)
+        ? '<i class="fa-solid fa-triangle-exclamation st_mangler_dependency_warning" title="Bound character no longer exists — currently matches no one; falling back to unbound behavior."></i>'
+        : '';
+    return `
+        <select class="st_mangler_status_bind" title="Bound character in this chat">
+            <option value="" ${!boundAvatar ? 'selected' : ''}>Any character</option>
+            ${optionsHtml}
+        </select>${warning}`;
 }
 
 function renderStatusPanelRows(settings) {
     const rows = settings.effects
-        .filter(e => e.enabled && e.trigger.mode === 'progressive')
-        .map(e => `
+        .filter(e => e.enabled)
+        .map(e => {
+            const override = getEffectChatActiveOverride(e);
+            const active = resolveChatActiveState(e.chatActivationMode, override);
+            const levelInput = e.trigger.mode === 'progressive'
+                ? `<input type="number" class="text_pole st_mangler_status_set_level" min="0" max="1" step="0.01" value="${getEffectLevel(e).toFixed(2)}" title="Set level for this chat (also resets turns active/locked)" />`
+                : '';
+            return `
             <div class="st_mangler_status_row" data-effect-id="${e.id}">
-                ${effectStatusBadgeHtml(e)}<span class="st_mangler_status_row_label">${escapeHtmlForDisplay(e.label || e.id)}${boundCharacterSuffix(e)}</span>
-                <input type="number" class="text_pole st_mangler_status_set_level" min="0" max="1" step="0.01" value="${getEffectLevel(e).toFixed(2)}" title="Set level for this chat (also resets turns active/locked)" />
-            </div>`)
+                <input type="checkbox" class="st_mangler_status_active" ${active ? 'checked' : ''} title="Active in this chat" />
+                ${effectStatusBadgeHtml(e)}<span class="st_mangler_status_row_label">${escapeHtmlForDisplay(e.label || e.id)}</span>
+                ${override !== undefined ? `<i class="fa-solid fa-rotate-left st_mangler_status_reset_active" title="Reset to this effect's default (${e.chatActivationMode === 'auto' ? 'active' : 'inactive'} by default)"></i>` : ''}
+                ${bindCharacterOptionsHtml(e)}
+                ${levelInput}
+            </div>`;
+        })
         .join('');
-    return rows || '<small class="st_mangler_status_empty">No enabled progressive effects.</small>';
+    return rows || '<small class="st_mangler_status_empty">No enabled effects.</small>';
 }
 
 // No-op when the panel isn't open — callers don't need to check first.
@@ -61,9 +89,9 @@ function openStatusPanel(settings) {
     loadMovingUIState();
     dragElement($('#st_mangler_status_panel'));
     $('#st_mangler_status_panel_close').on('click', closeStatusPanel);
-    // Delegated on the outer panel (not the body) so it survives refreshStatusPanelContents'
-    // .html() replacement of just the body — no rebinding needed after every refresh. Same
-    // three-call reset as the settings panel's "Set level" button/Dispel now — never auto-locks.
+    // Delegated on the outer panel (not the body) so all of these survive
+    // refreshStatusPanelContents' .html() replacement of just the body — no rebinding needed
+    // after every refresh.
     $('#st_mangler_status_panel').on('change', '.st_mangler_status_set_level', function () {
         const id = $(this).closest('.st_mangler_status_row').data('effect-id');
         const effect = getSettings().effects.find(e => e.id === id);
@@ -72,6 +100,27 @@ function openStatusPanel(settings) {
         setEffectLevel(effect, level);
         setEffectTurnsActive(effect, 0);
         setEffectLocked(effect, false);
+    });
+    $('#st_mangler_status_panel').on('change', '.st_mangler_status_active', function () {
+        const id = $(this).closest('.st_mangler_status_row').data('effect-id');
+        const effect = getSettings().effects.find(e => e.id === id);
+        if (!effect) return;
+        setEffectChatActiveOverride(effect, $(this).prop('checked'));
+        refreshStatusPanelContents(getSettings());
+    });
+    $('#st_mangler_status_panel').on('click', '.st_mangler_status_reset_active', function () {
+        const id = $(this).closest('.st_mangler_status_row').data('effect-id');
+        const effect = getSettings().effects.find(e => e.id === id);
+        if (!effect) return;
+        setEffectChatActiveOverride(effect, undefined);
+        refreshStatusPanelContents(getSettings());
+    });
+    $('#st_mangler_status_panel').on('change', '.st_mangler_status_bind', function () {
+        const id = $(this).closest('.st_mangler_status_row').data('effect-id');
+        const effect = getSettings().effects.find(e => e.id === id);
+        if (!effect) return;
+        setEffectChatBinding(effect, $(this).val());
+        refreshStatusPanelContents(getSettings());
     });
 }
 

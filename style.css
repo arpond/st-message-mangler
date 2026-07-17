@@ -246,6 +246,20 @@
     white-space: nowrap;
 }
 
+#st_mangler_status_panel .st_mangler_status_bind {
+    /* Same fight-for-space issue as .st_mangler_status_set_level below — a <select> has no
+       .text_pole default but still stretches in a flex row without an explicit cap. */
+    flex: 0 0 auto;
+    width: 8em;
+    max-width: 8em;
+    margin: 0;
+}
+
+#st_mangler_status_panel .st_mangler_status_active {
+    flex: 0 0 auto;
+    margin: 0;
+}
+
 #st_mangler_status_panel .st_mangler_status_empty {
     opacity: 0.6;
     font-style: italic;

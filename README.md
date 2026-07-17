@@ -310,26 +310,34 @@ security boundary.
     rating locks an effect. The floating status panel has the same control per effect row, for
     setting a level without opening the settings panel mid-scene.
 
-### Group-chat-aware binding
+### Per-chat activation and character binding
 
-The **Bound character** field (Basics tab, optional, "Any character" by default) locks an
-effect's detect/target relationship to one specific character, independent of the existing
-**Detect from**/**Target** settings. Unbound (the default) matches every character, same as
-before — the binding only ever *restricts* which character's messages count, both for detection
-and for the transform. Useful in group chats: without it, `detectSource: character`/`target:
-character` respond to *any* character's dialogue; binding narrows that to one specific character,
-so e.g. a "jealousy" effect can be scoped to only react to (and only mangle) one particular
-character rather than the whole group. User messages are never gated by this — there's only one
-"you" in a chat, so binding has nothing to restrict there. If the bound character is later
-deleted, the binding fails open (treated as unbound, matches everyone again) rather than
-permanently blocking the effect — a warning under the field explains this if it happens. To
-combine several characters under one effect, use **Duplicate effect** and bind each copy to a
-different character (a duplicate never inherits the binding — always starts at "Any character").
-In a group chat, the picker only lists that group's own members rather than every character in
-your install; a character you'd already bound to from outside the group still shows correctly,
-it just won't appear as a *new* option there. The floating status panel shows the bound
-character's name next to each effect's label, so duplicated per-character effects (the workflow
-above) are distinguishable at a glance instead of looking like identical rows.
+Effects are defined globally (one config, usable in any chat), but whether an effect actually
+*runs* in a given chat, and which character it's bound to there, are configured **per chat** from
+the floating status panel (wand menu → **Mangler status**) — not from the effect editor. This
+means the same globally-defined effect can be active-and-bound-to-Alice in one chat, off entirely
+in another, and bound to a different character in a third, without re-configuring anything global
+each time you switch chats.
+
+- **Chat activation** — the effect editor's Basics tab has a **Chat activation** field: "Active by
+  default (every chat)" (today's behavior — runs everywhere unless turned off for a specific chat)
+  or "Inactive by default (turn on per chat)" (off everywhere until explicitly enabled for a
+  chat). Either way, the status panel shows a checkbox per enabled effect reflecting its *actual*
+  state in the current chat (default or override), with a small reset icon to clear a per-chat
+  override back to the effect's global default.
+- **Character binding** — the status panel also shows a picker per effect, scoped to who can
+  actually speak in the current chat (a group's members in a group chat, just the one active
+  character otherwise) rather than your whole install's roster. When set, that effect's detection
+  and transform only ever consider that specific character's messages, independent of the
+  **Detect from**/**Target** settings — e.g. a "jealousy" effect can be scoped to react to (and
+  only mangle) one particular character in a group rather than the whole cast. Unbound (the
+  default) matches every character. User messages are never gated by this — there's only one
+  "you" in a chat, so binding has nothing to restrict there. If the bound character is later
+  deleted, the binding fails open (treated as unbound) rather than permanently blocking the
+  effect.
+
+Both settings are chat-scoped state (same storage mechanism as level/turns/locked), so they
+persist per chat and travel with that chat's data, not with the effect's global config.
 
 ### Effect dependency
 

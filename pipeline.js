@@ -1,16 +1,16 @@
 import { extension_prompt_types, extension_prompt_roles } from '../../../../script.js';
-import { context } from './lib/context.js';
+import { context, getCurrentCharacterId } from './lib/context.js';
 import { log, warn } from './lib/log.js';
 import { getSettings, debugLog } from './lib/settings.js';
 import {
     getEffectLevel, setEffectLevel, getEffectTurnsActive, setEffectTurnsActive, getEffectLocked, setEffectLocked,
-    consumeTransformPaused, isPrerequisiteMet,
+    consumeTransformPaused, isPrerequisiteMet, getEffectChatBinding, getEffectChatActiveOverride,
 } from './lib/chatState.js';
 import { runBatchedLlmDetectors, runLlmRewrite } from './lib/llmClient.js';
 import {
     matchesKeywordList, applyRegexEffect, applyDrunk, escapeHtmlForDisplay, wordDiffHighlight,
     resolveAwarenessCue, resolveLevelTrend, splitContinuationSuffix, buildRespondingToContext,
-    resolveDetectionLevelUpdate, matchesBoundCharacter,
+    resolveDetectionLevelUpdate, matchesBoundCharacter, resolveChatActiveState,
 } from './lib/pure.js';
 
 // Gates which hook is allowed to update an effect's level — 'user' for onMessageSent,
@@ -30,16 +30,24 @@ function shouldDetectFromSource(effect, source) {
 function resolveMessageCharacterAvatar(message) {
     if (message.original_avatar) return message.original_avatar;
     if (message.force_avatar) return message.force_avatar;
-    return context.characters[context.characterId]?.avatar ?? null;
+    return context.characters[getCurrentCharacterId()]?.avatar ?? null;
 }
 
-// Wraps matchesBoundCharacter with a fail-open check: if the effect's bound character was since
-// deleted (no longer present in context.characters), treat it the same as unbound rather than
-// leaving the effect permanently unable to match anyone — same fail-open precedent as
+// Wraps matchesBoundCharacter with a fail-open check: if the effect's chat-scoped bound character
+// was since deleted (no longer present in context.characters), treat it the same as unbound
+// rather than leaving the effect permanently unable to match anyone — same fail-open precedent as
 // isPrerequisiteMet for a broken effect dependency reference.
 function effectMatchesCharacter(effect, source, messageCharacterAvatar) {
-    if (effect.characterAvatar && !context.characters.some(c => c.avatar === effect.characterAvatar)) return true;
-    return matchesBoundCharacter(effect, source, messageCharacterAvatar);
+    const boundCharacterAvatar = getEffectChatBinding(effect);
+    if (boundCharacterAvatar && !context.characters.some(c => c.avatar === boundCharacterAvatar)) return true;
+    return matchesBoundCharacter(boundCharacterAvatar, source, messageCharacterAvatar);
+}
+
+// Resolves whether an effect is active in the current chat — combines its global
+// chatActivationMode default with any per-chat override (see lib/chatState.js's
+// getEffectChatActiveOverride and pure.js's resolveChatActiveState).
+function isEffectActiveInChat(effect) {
+    return resolveChatActiveState(effect.chatActivationMode, getEffectChatActiveOverride(effect));
 }
 
 // Dispel keywords are checked unconditionally (regardless of detector mode) and take priority
@@ -152,12 +160,13 @@ export async function applyEffects(originalText, message, settings, source, isCo
     // spamming every unbound effect on every message.
     debugLog(`applyEffects: resolved messageCharacterAvatar=${JSON.stringify(messageCharacterAvatar)} (message.original_avatar=${JSON.stringify(message.original_avatar)}, message.force_avatar=${JSON.stringify(message.force_avatar)}, message.name=${JSON.stringify(message.name)})`);
     for (const e of settings.effects) {
-        if (e.characterAvatar) {
-            debugLog(`applyEffects: effect "${e.label}" bound to characterAvatar=${JSON.stringify(e.characterAvatar)}, matches this message=${effectMatchesCharacter(e, source, messageCharacterAvatar)}, boundCharacterExistsInRoster=${context.characters.some(c => c.avatar === e.characterAvatar)}`);
+        const boundCharacterAvatar = getEffectChatBinding(e);
+        if (boundCharacterAvatar) {
+            debugLog(`applyEffects: effect "${e.label}" bound to characterAvatar=${JSON.stringify(boundCharacterAvatar)}, matches this message=${effectMatchesCharacter(e, source, messageCharacterAvatar)}, boundCharacterExistsInRoster=${context.characters.some(c => c.avatar === boundCharacterAvatar)}`);
         }
     }
 
-    const dueLlmDetectors = settings.effects.filter(e => e.enabled && e.trigger.mode === 'progressive'
+    const dueLlmDetectors = settings.effects.filter(e => e.enabled && isEffectActiveInChat(e) && e.trigger.mode === 'progressive'
         && e.trigger.detector === 'llm' && shouldDetectFromSource(e, source) && effectMatchesCharacter(e, source, messageCharacterAvatar)
         // A locked cumulative-lock effect ignores its rating entirely (see applyLlmRating), so
         // including it just pays batch-prompt tokens for a discarded result.
@@ -174,7 +183,7 @@ export async function applyEffects(originalText, message, settings, source, isCo
             // get confused by overlapping quiet-generation requests. Serializing costs the
             // detector's own latency on this message instead of running for free in the
             // background, but only in this specific combination.
-            const hasRewriteEffect = settings.effects.some(e => e.enabled && e.type === 'llm-rewrite' && effectAppliesToTarget(e, source) && effectMatchesCharacter(e, source, messageCharacterAvatar));
+            const hasRewriteEffect = settings.effects.some(e => e.enabled && isEffectActiveInChat(e) && e.type === 'llm-rewrite' && effectAppliesToTarget(e, source) && effectMatchesCharacter(e, source, messageCharacterAvatar));
             if (hasRewriteEffect) {
                 debugLog(`applyEffects: awaiting LLM detector batch for ${dueLlmDetectors.length} effect(s) (serialized — an llm-rewrite effect is active this message), budget remaining after=${budget.remaining}`);
                 await runBatchedLlmDetectors(dueLlmDetectors, settings.effects);
@@ -191,6 +200,11 @@ export async function applyEffects(originalText, message, settings, source, isCo
     for (const effect of settings.effects) {
         if (!effect.enabled) {
             debugLog(`applyEffects: "${effect.label}" skipped — disabled.`);
+            updateAwarenessCue(effect, 0, false);
+            continue;
+        }
+        if (!isEffectActiveInChat(effect)) {
+            debugLog(`applyEffects: "${effect.label}" skipped — inactive in this chat.`);
             updateAwarenessCue(effect, 0, false);
             continue;
         }
