@@ -7,6 +7,10 @@ your own messages, but can be set to also or instead rewrite the character's rep
 displayed bubble and the model's actual context reflect the final mangled text; optionally you
 can also show the original alongside it (display-only — the model never sees the original).
 
+New to this extension? **[`SETUP_GUIDE.md`](SETUP_GUIDE.md)** is a hands-on, step-by-step
+walkthrough building three complete effects from scratch (simple → intermediate → advanced) —
+this README is the reference; that guide is the tutorial.
+
 **Contents:** [Install](#install) · [Usage](#usage) · [Configuring an effect](#configuring-an-effect)
 · [Day-to-day tools](#day-to-day-tools) · [Example effects](#example-effects) · [FAQ](#faq) ·
 [Troubleshooting](#troubleshooting) · [How it works](#how-it-works)
@@ -432,8 +436,19 @@ you're done — it persists across reloads like any other setting.
 
 `examples/faith-conversion-lorebook.json` is a matching World Info entry for the "Faith cracks"
 row above — import it via SillyTavern's World Info panel, attach it to a chat, and pair it with an
-effect configured like the table row to see the mechanic end to end (lorebook establishes *why*
-the compulsion exists narratively; the effect is what actually enforces it turn to turn).
+effect configured like the table row to see the mechanic end to end.
+
+**Is the lorebook entry actually necessary?** No — the effect pipeline works identically with or
+without one; nothing in this extension reads or requires a World Info entry. The two serve
+different, complementary roles, though: the **awareness cue** (Basics tab) only injects while the
+effect is *active* (`level >= minLevelToApply`), and only describes the *current intensity*
+(`{{level_pct}}`, `{{trend}}`) — it's a live "how strong right now" signal with no memory of why
+this is happening. A **constant lorebook entry**, by contrast, is always in context, including at
+`level = 0` before anything has triggered — it's what establishes *why* the mechanic exists at all,
+so the model has a coherent in-fiction reason ready before the cue ever kicks in, rather than
+inventing one on the spot once dialogue starts drifting. For a quick mechanical test, skip the
+lorebook — the effect still works. For something meant to read consistently across a real scene,
+the lorebook is what keeps the "why" from feeling arbitrary.
 
 ## FAQ
 
