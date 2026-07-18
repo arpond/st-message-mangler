@@ -6,7 +6,7 @@ import {
     trackerStatusBadgeHtml, getTrackerLevel, setTrackerLevel, setTrackerTurnsActive, setTrackerLocked, setTransformPaused,
     getTrackerChatBinding, setTrackerChatBinding, getTrackerChatActiveOverride, setTrackerChatActiveOverride,
 } from './lib/chatState.js';
-import { escapeHtmlForDisplay, resolveChatActiveState } from './lib/pure.js';
+import { escapeHtmlForDisplay, resolveChatActiveState, resolveEffectTracker } from './lib/pure.js';
 import { bindableCharacters } from './lib/characterUtils.js';
 
 // ---- Floating status panel ----
@@ -48,7 +48,7 @@ function renderStatusPanelRows(settings) {
     const rows = settings.effects
         .filter(e => e.enabled)
         .map(e => {
-            const tracker = settings.trackers.find(t => t.id === e.trackerId);
+            const tracker = resolveEffectTracker(e, settings.trackers);
             if (!tracker) {
                 return `
             <div class="st_mangler_status_row" data-effect-id="${e.id}">

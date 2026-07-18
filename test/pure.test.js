@@ -11,7 +11,7 @@ import {
     wrapUntrusted, INJECTION_GUARD, withTimeout, extractRating, resolveLlmRatingUpdate,
     resolveDetectionLevelUpdate, buildChainPreservationNote, wouldCreateCycle, matchesBoundCharacter,
     resolveChatActiveState, resolveBindableCharacters, restingLevelValue, meetsDirectionalThreshold,
-    resolveHitLevel, migrateEffectDependency, resolveLlmMagnitudeScale,
+    resolveHitLevel, migrateEffectDependency, resolveLlmMagnitudeScale, resolveEffectTracker,
 } from '../lib/pure.js';
 
 test('clamp01 clamps to [0, 1]', () => {
@@ -33,6 +33,18 @@ test('defaultTracker adds a unique id on top of defaultTrackerShape', () => {
     assert.match(a.id, /^tracker_/);
     assert.notEqual(a.id, b.id);
     assert.equal(a.mode, 'always');
+});
+
+test('resolveEffectTracker finds the tracker referenced by an effect', () => {
+    const t1 = { id: 't1' };
+    const t2 = { id: 't2' };
+    assert.equal(resolveEffectTracker({ trackerId: 't2' }, [t1, t2]), t2);
+});
+
+test('resolveEffectTracker returns null (not undefined) for a dangling or unset trackerId', () => {
+    const t1 = { id: 't1' };
+    assert.equal(resolveEffectTracker({ trackerId: 'missing' }, [t1]), null);
+    assert.equal(resolveEffectTracker({ trackerId: null }, [t1]), null);
 });
 
 test('defaultEffectShape has no tracking config — trackerId placeholder plus type-specific fields', () => {

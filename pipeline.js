@@ -177,6 +177,12 @@ export async function applyEffects(originalText, message, settings, source, isCo
         }
     }
 
+    // Built once per call and reused by both the hasRewriteEffect check below and Phase B — every
+    // effect needs its tracker resolved, and this file previously did that via a fresh
+    // settings.trackers.find() per effect (O(effects * trackers) on this hot path, since
+    // applyEffects runs on every message).
+    const trackerById = new Map(settings.trackers.map(t => [t.id, t]));
+
     // --- Phase A: resolve every Tracker's level/trend once ---
     const resolvedTrackers = new Map();
     for (const tracker of settings.trackers) {
@@ -221,7 +227,7 @@ export async function applyEffects(originalText, message, settings, source, isCo
             // background, but only in this specific combination.
             const hasRewriteEffect = settings.effects.some(e => {
                 if (!e.enabled || e.type !== 'llm-rewrite' || !effectAppliesToTarget(e, source)) return false;
-                const tracker = settings.trackers.find(t => t.id === e.trackerId);
+                const tracker = trackerById.get(e.trackerId);
                 return !!tracker && isTrackerActiveInChat(tracker) && trackerMatchesCharacter(tracker, source, messageCharacterAvatar);
             });
             if (hasRewriteEffect) {
@@ -239,7 +245,7 @@ export async function applyEffects(originalText, message, settings, source, isCo
     // --- Phase B: walk Effects in list order, each consuming its Tracker's resolved level ---
     let text = originalText;
     for (const effect of settings.effects) {
-        const tracker = settings.trackers.find(t => t.id === effect.trackerId);
+        const tracker = trackerById.get(effect.trackerId);
         if (!tracker) {
             debugLog(`applyEffects: "${effect.label}" skipped — dangling trackerId (no matching tracker), treated as inert.`);
             updateAwarenessCue(effect, 0, false);

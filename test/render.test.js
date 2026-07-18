@@ -2,12 +2,26 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { defaultEffect, defaultTracker, defaultTrackerShape } from '../lib/pure.js';
 import {
-    infoIcon, field, renderTriggerPanel, renderDependencyPanel, renderTypeFields, renderTestPanel,
+    infoIcon, field, renderRowIdentity, renderTriggerPanel, renderDependencyPanel, renderTypeFields, renderTestPanel,
     renderTrackerTestPanel, renderTrackerPickerField, EFFECT_TYPE_LABELS,
 } from '../lib/render.js';
 
 test('infoIcon renders a title-bearing icon with the given text', () => {
     assert.match(infoIcon('hello & world'), /title="hello &amp; world"/);
+});
+
+test('renderRowIdentity reflects expanded/enabled/label state and the given toggle class/title', () => {
+    const collapsed = renderRowIdentity('st_mangler_tracker_toggle', false, false, 'Suspicion', 'Tracker label');
+    assert.match(collapsed, /st_mangler_tracker_toggle/);
+    assert.match(collapsed, /fa-chevron-right/);
+    assert.doesNotMatch(collapsed, /checked/);
+    assert.match(collapsed, /value="Suspicion"/);
+    assert.match(collapsed, /title="Tracker label"/);
+
+    const expanded = renderRowIdentity('st_mangler_effect_toggle', true, true, '<script>', 'Effect label');
+    assert.match(expanded, /fa-chevron-down/);
+    assert.match(expanded, /checked/);
+    assert.match(expanded, /value="&lt;script&gt;"/); // label is escaped like any other field
 });
 
 test('field renders an input for non-textarea types, a textarea otherwise', () => {

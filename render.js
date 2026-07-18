@@ -1,10 +1,11 @@
 import {
     getTrackerLevel, getTrackerTurnsActive, getTrackerLocked, trackerStatusBadgeHtml, describeDependencyState,
 } from './lib/chatState.js';
-import { escapeHtmlForDisplay } from './lib/pure.js';
+import { escapeHtmlForDisplay, resolveEffectTracker } from './lib/pure.js';
 import {
-    infoIcon, field, renderTriggerPanel, renderTrackerBasicsPanel, renderDependencyPanel, renderTrackerTestPanel,
-    renderTrackerPickerField, renderTypeFields, renderTestPanel, EFFECT_TYPE_LABELS, EFFECT_TABS, TRACKER_TABS,
+    infoIcon, field, renderRowIdentity, renderTriggerPanel, renderTrackerBasicsPanel, renderDependencyPanel,
+    renderTrackerTestPanel, renderTrackerPickerField, renderTypeFields, renderTestPanel,
+    EFFECT_TYPE_LABELS, EFFECT_TABS, TRACKER_TABS,
 } from './lib/render.js';
 
 // Session-only (not persisted to settings) — which tracker/effect rows are currently expanded and
@@ -28,11 +29,7 @@ export function renderTrackerRow(tracker, allTrackers = [tracker]) {
     return `
         <div class="st_mangler_tracker" data-tracker-id="${tracker.id}">
             <div class="flex-container alignItemsCenter st_mangler_effect_header">
-                <div class="menu_button menu_button_icon st_mangler_tracker_toggle" title="${expanded ? 'Collapse' : 'Expand'}">
-                    <i class="fa-solid ${expanded ? 'fa-chevron-down' : 'fa-chevron-right'}"></i>
-                </div>
-                <input type="checkbox" class="st_mangler_field" data-field="enabled" ${tracker.enabled ? 'checked' : ''} title="Enabled" />
-                <input type="text" class="text_pole st_mangler_field st_mangler_effect_title_input" data-field="label" value="${escapeHtmlForDisplay(tracker.label)}" placeholder="(unlabeled)" title="Tracker label" />
+                ${renderRowIdentity('st_mangler_tracker_toggle', expanded, tracker.enabled, tracker.label, 'Tracker label')}
                 <span class="st_mangler_effect_summary_type">${tracker.mode === 'progressive' ? `Progressive (${tracker.detector})` : 'Always'}</span>
                 ${dependencyState ? `<i class="fa-solid fa-triangle-exclamation st_mangler_dependency_warning" title="${escapeHtmlForDisplay(dependencyState.reason)}"></i>` : ''}
                 ${trackerStatusBadgeHtml(tracker)}
@@ -75,15 +72,11 @@ export function renderEffectRow(effect, allTrackers = []) {
         <div class="st_mangler_tab_btn ${tab.id === activeTab ? 'active' : ''}" data-tab="${tab.id}">${tab.label}</div>`).join('');
     const pane = (id, html) => `
         <div class="st_mangler_tab_pane" data-tab="${id}" style="display: ${id === activeTab ? 'block' : 'none'};">${html}</div>`;
-    const trackerDangling = !!effect.trackerId && !allTrackers.some(t => t.id === effect.trackerId);
+    const trackerDangling = !!effect.trackerId && !resolveEffectTracker(effect, allTrackers);
     return `
         <div class="st_mangler_effect" data-effect-id="${effect.id}">
             <div class="flex-container alignItemsCenter st_mangler_effect_header">
-                <div class="menu_button menu_button_icon st_mangler_effect_toggle" title="${expanded ? 'Collapse' : 'Expand'}">
-                    <i class="fa-solid ${expanded ? 'fa-chevron-down' : 'fa-chevron-right'}"></i>
-                </div>
-                <input type="checkbox" class="st_mangler_field" data-field="enabled" ${effect.enabled ? 'checked' : ''} title="Enabled" />
-                <input type="text" class="text_pole st_mangler_field st_mangler_effect_title_input" data-field="label" value="${escapeHtmlForDisplay(effect.label)}" placeholder="(unlabeled)" title="Effect label" />
+                ${renderRowIdentity('st_mangler_effect_toggle', expanded, effect.enabled, effect.label, 'Effect label')}
                 <span class="st_mangler_effect_summary_type">${EFFECT_TYPE_LABELS[effect.type] ?? effect.type}</span>
                 ${trackerDangling ? `<i class="fa-solid fa-triangle-exclamation st_mangler_dependency_warning" title="This effect's tracker no longer exists — treated as inert until a tracker is chosen again."></i>` : ''}
                 <div class="menu_button menu_button_icon st_mangler_effect_move_up" title="Move up"><i class="fa-solid fa-arrow-up"></i></div>

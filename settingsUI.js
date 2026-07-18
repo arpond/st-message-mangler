@@ -10,7 +10,7 @@ import {
     escapeHtmlForDisplay, resolveAwarenessCue, backfillDefaults,
     resolveScaleStep, generateScaleSteps, sanitizeScaleSteps,
     defaultTrackerShape, defaultTracker, defaultEffectShape, defaultEffect,
-    restingLevelValue,
+    restingLevelValue, resolveEffectTracker,
 } from './lib/pure.js';
 import { infoIcon, PROMPT_TEMPLATE_EXAMPLES, EFFECT_TYPE_LABELS } from './lib/render.js';
 import { applySingleEffect, clearAllAwarenessCues, awarenessCueKey } from './pipeline.js';
@@ -39,28 +39,25 @@ function setFieldByPath(obj, path, value) {
     target[parts[parts.length - 1]] = value;
 }
 
-// No-ops past either edge of the list rather than disabling/hiding the buttons on first/last
-// row — simplest option that still can't produce an invalid state.
-function moveTracker(settings, id, delta) {
-    const index = settings.trackers.findIndex(t => t.id === id);
+// Shared by moveTracker/moveEffect/moveScaleStep below — no-ops past either edge of the list
+// rather than disabling/hiding the buttons on first/last row, the simplest option that still
+// can't produce an invalid state.
+function moveItem(list, index, delta) {
     const target = index + delta;
-    if (index === -1 || target < 0 || target >= settings.trackers.length) return;
-    [settings.trackers[index], settings.trackers[target]] = [settings.trackers[target], settings.trackers[index]];
+    if (index === -1 || target < 0 || target >= list.length) return;
+    [list[index], list[target]] = [list[target], list[index]];
+}
+
+function moveTracker(settings, id, delta) {
+    moveItem(settings.trackers, settings.trackers.findIndex(t => t.id === id), delta);
 }
 
 function moveEffect(settings, id, delta) {
-    const index = settings.effects.findIndex(e => e.id === id);
-    const target = index + delta;
-    if (index === -1 || target < 0 || target >= settings.effects.length) return;
-    [settings.effects[index], settings.effects[target]] = [settings.effects[target], settings.effects[index]];
+    moveItem(settings.effects, settings.effects.findIndex(e => e.id === id), delta);
 }
 
-// Same no-op-past-either-edge pattern as moveEffect above, applied to one effect's scaleSteps array.
 function moveScaleStep(effect, index, delta) {
-    const steps = effect.llmRewrite.scaleSteps;
-    const target = index + delta;
-    if (target < 0 || target >= steps.length) return;
-    [steps[index], steps[target]] = [steps[target], steps[index]];
+    moveItem(effect.llmRewrite.scaleSteps, index, delta);
 }
 
 function downloadSettingsJson(trackers, effects, filename) {
@@ -82,7 +79,7 @@ function exportEffects(settings) {
 // Includes the effect's own tracker in the export (if it still resolves) so a single-effect
 // export is self-contained and meaningfully re-importable on its own.
 function exportSingleEffect(effect, settings) {
-    const tracker = settings.trackers.find(t => t.id === effect.trackerId);
+    const tracker = resolveEffectTracker(effect, settings.trackers);
     const slug = effect.label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
     downloadSettingsJson(tracker ? [tracker] : [], [effect], `message-mangler-effect-${slug || effect.id}.json`);
 }
