@@ -162,6 +162,11 @@ it onto a range — it's just handed the one instruction that already applies. `
 `{{level_pct}}` remain available in Structured steps mode too, for any part of the template that
 still wants the raw number.
 
+A related but separate placeholder, `{{rule_instruction}}`, resolves the same way but comes from
+the effect's **Rules** tab instead of Structured steps — see "Effect rules — reacting to
+combinations of Trackers" below. It's empty (a no-op) unless the effect has at least one rule
+configured.
+
 Building a ladder of several steps by hand gets tedious — the **Generate** control above the step
 list fills in N steps at computed thresholds in one click (Linear: evenly spaced; Exponential:
 clustered toward the low end, more resolution for subtle early changes). It replaces whatever
@@ -361,6 +366,30 @@ currently-unmet prerequisite (one line per issue, when there's more than one). D
 importing a tracker never carries its dependencies over — a copy always starts with none, so it
 can't accidentally point at the wrong tracker.
 
+### Effect rules — reacting to combinations of Trackers
+
+Every effect has one required Tracker (Basics tab) — that tracker still always supplies
+`{{level}}`/`{{level_pct}}`/`{{trend}}`, chat-activation, and character binding, no matter what's
+on this tab. The optional **Rules** tab lets that *same* effect additionally react to
+combinations of *other* trackers too, without needing separate effects per combination. Each rule
+is one or more conditions (tracker + minimum level, AND-gate — every listed tracker must meet its
+own minimum) plus an instruction fragment available to `llm-rewrite` templates as
+`{{rule_instruction}}` (ignored by `regex`/`drunk` effects). Rules are evaluated in order:
+
+- **First match wins** (default) — the first rule whose every condition is satisfied is used;
+  later rules are never checked. A rule with *no* conditions always matches, so putting one last
+  gives you an explicit "otherwise" fallback. This is how "if A and B, do X; if just A, do Y; if
+  just B, do Z" gets expressed: three ordered rules, each naming its own condition set.
+- **Stack all matches** — instead of stopping at the first match, every matching rule's
+  instruction text is joined together and all of them count as "active."
+
+Empty rules (the default for every effect) leaves this effect's activity gated exactly the way it
+always was — its own tracker's **Min level to apply** (Trigger tab). The moment a rule is added,
+rules take over that gate completely for this effect; the tracker's own `minLevelToApply` is no
+longer consulted for it (other effects still using that tracker directly are unaffected). A rule
+condition referencing a tracker that's since been deleted is dropped from that rule's AND-gate
+(fails open), same as a broken Tracker dependency.
+
 ### Worked examples: resting level, hit direction, and dependencies together
 
 These fields compose in ways that aren't obvious from the field descriptions alone — a few
@@ -480,9 +509,16 @@ A few concept pairs that sound similar but mean different things, collected in o
   AI's dialogue) while the effect itself only ever transforms the other speaker's text.
 - **Tracker vs. Effect** — a **Tracker** is pure detection/level state (keyword or LLM evidence →
   a per-chat 0–1 level → escalation/decay), no transform or prompt text of its own. An **Effect**
-  is pure behavior (a transform and/or an awareness cue) gated by one Tracker, chosen on the
-  effect's Basics tab. Today it's always one Tracker per Effect, but several Effects can point at
-  the same Tracker to react to one shared signal.
+  is pure behavior (a transform and/or an awareness cue) gated by one primary Tracker, chosen on
+  the effect's Basics tab (that's what always drives `{{level}}`/`{{level_pct}}`/`{{trend}}` and
+  chat-activation/character binding). Several Effects can point at the same Tracker to react to one
+  shared signal; an Effect can also optionally react to *other* Trackers too via its Rules tab (see
+  "Effect rules" above) without changing its primary Tracker.
+- **Tracker's Min level to apply vs. an Effect's Rules** — both gate whether an effect is
+  currently "active." With no rules configured (the default), an effect's activity is gated by its
+  own tracker's **Min level to apply** threshold. The moment that effect has at least one rule, the
+  rules entirely take over that gate for it — the tracker's own threshold is no longer consulted
+  for that effect (other effects still using the tracker directly are unaffected either way).
 - **`{{level}}` vs. `{{level_pct}}`** — the same value in two units: 0-1 vs. 0-100. Use whichever
   reads more naturally in your prompt. If your model seems to treat one form oddly (e.g. the
   literal maximum reading as "weak" — see the known-quirk note above), try the other.

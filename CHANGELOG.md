@@ -4,6 +4,27 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v36
+
+- **Rule-composition layer for Effects (phase 2 of the Tracker/Effect split)** — an optional new
+  **Rules** tab per effect lets it react to *combinations* of Trackers, not just its own required
+  one. Each rule is an AND-gate over one or more `tracker + minimum level` conditions plus an
+  instruction fragment, exposed to `llm-rewrite` templates as a new `{{rule_instruction}}`
+  placeholder (a no-op for `regex`/`drunk`). Rules resolve in order — **First match wins**
+  (default) uses the first fully-satisfied rule's text; **Stack all matches** instead joins every
+  matching rule's text together. A rule with no conditions matches vacuously, useful as an explicit
+  "otherwise" fallback at the end of a first-match list.
+  - Purely additive: an effect with no rules (every existing effect, unchanged) behaves exactly as
+    before — its own tracker's **Min level to apply** still gates it. Adding a rule to an effect
+    hands that gate entirely to its rules from then on; the effect's primary tracker still always
+    supplies `{{level}}`/`{{level_pct}}`/`{{trend}}`, chat-activation, and character binding either
+    way. No settings migration needed.
+  - A rule condition referencing a since-deleted tracker is dropped from that rule's AND-gate
+    (fails open), same precedent as a broken Tracker dependency.
+  - This is the deterministic alternative to reconciling several `llm-rewrite` effects' freeform
+    prompts in the model's head — see the "Structured, consolidated llm-rewrite prompt composition"
+    idea this supersedes for the one-deterministic-winner case.
+
 ## v35
 
 - **Decouple tracking from behavior — Trackers and Effects are now separate entities.** What was

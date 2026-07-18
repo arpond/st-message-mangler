@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { defaultEffect, defaultTracker, defaultTrackerShape } from '../lib/pure.js';
+import { defaultEffect, defaultTracker, defaultTrackerShape, defaultRule } from '../lib/pure.js';
 import {
     infoIcon, field, renderRowIdentity, renderTriggerPanel, renderDependencyPanel, renderTypeFields, renderTestPanel,
-    renderTrackerTestPanel, renderTrackerPickerField, EFFECT_TYPE_LABELS,
+    renderTrackerTestPanel, renderTrackerPickerField, renderRulesPanel, EFFECT_TYPE_LABELS,
 } from '../lib/render.js';
 
 test('infoIcon renders a title-bearing icon with the given text', () => {
@@ -205,4 +205,31 @@ test('renderDependencyPanel shows a note instead of fields for non-progressive t
     const html = renderDependencyPanel(tracker, [tracker]);
     assert.match(html, /Only applies to progressive trackers/);
     assert.doesNotMatch(html, /Dependencies/);
+});
+
+test('renderRulesPanel shows the empty-state fallback hint when there are no rules', () => {
+    const effect = defaultEffect('llm-rewrite');
+    const html = renderRulesPanel(effect, []);
+    assert.match(html, /falls back to this effect's own tracker/);
+});
+
+test('renderRulesPanel renders a condition row per rule condition, tracker options, and instruction text', () => {
+    const t1 = defaultTracker();
+    t1.label = 'Fear';
+    const effect = defaultEffect('llm-rewrite');
+    const rule = defaultRule();
+    rule.conditions = [{ trackerId: t1.id, minLevel: 0.6 }];
+    rule.text = 'the character trembles';
+    effect.rules = [rule];
+    const html = renderRulesPanel(effect, [t1]);
+    assert.match(html, new RegExp(`<option value="${t1.id}" selected>Fear</option>`));
+    assert.match(html, /value="0.6"/);
+    assert.match(html, /the character trembles/);
+});
+
+test('renderRulesPanel shows a per-rule hint when a rule has no conditions', () => {
+    const effect = defaultEffect('llm-rewrite');
+    effect.rules = [defaultRule()];
+    const html = renderRulesPanel(effect, []);
+    assert.match(html, /this rule always matches/);
 });

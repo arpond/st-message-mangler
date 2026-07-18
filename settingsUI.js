@@ -8,8 +8,8 @@ import {
 import { runDetectionTest } from './lib/llmClient.js';
 import {
     escapeHtmlForDisplay, resolveAwarenessCue, backfillDefaults,
-    resolveScaleStep, generateScaleSteps, sanitizeScaleSteps,
-    defaultTrackerShape, defaultTracker, defaultEffectShape, defaultEffect,
+    resolveScaleStep, generateScaleSteps, sanitizeScaleSteps, sanitizeRules,
+    defaultTrackerShape, defaultTracker, defaultEffectShape, defaultEffect, defaultRule,
     restingLevelValue, resolveEffectTracker,
 } from './lib/pure.js';
 import { infoIcon, PROMPT_TEMPLATE_EXAMPLES, EFFECT_TYPE_LABELS } from './lib/render.js';
@@ -114,6 +114,13 @@ async function importSettingsFromFile(file, settings) {
             freshEffect.trackerId = idMap.get(effect.trackerId) ?? null;
             backfillDefaults(freshEffect, defaultEffectShape(freshEffect.type), warn);
             sanitizeScaleSteps(freshEffect.llmRewrite.scaleSteps, warn);
+            // Rule conditions reference tracker ids from the imported file too — remap through
+            // the same idMap as trackerId above, same "dangling drops from consideration" fail-open
+            // as any other broken reference if a referenced tracker wasn't in this import.
+            for (const rule of freshEffect.rules) {
+                for (const cond of rule.conditions) cond.trackerId = idMap.get(cond.trackerId) ?? cond.trackerId;
+            }
+            sanitizeRules(freshEffect.rules, warn);
             settings.effects.push(freshEffect);
         }
         refreshTrackerList(settings);
@@ -680,6 +687,63 @@ export function addSettingsUI() {
         context.saveSettingsDebounced();
     });
 
+    $('#st_mangler_effects').on('click', '.st_mangler_rule_add', function () {
+        const id = $(this).closest('.st_mangler_effect').data('effect-id');
+        const effect = settings.effects.find(e => e.id === id);
+        if (!effect) return;
+        effect.rules.push(defaultRule());
+        refreshEffectList(settings);
+        context.saveSettingsDebounced();
+    });
+
+    $('#st_mangler_effects').on('click', '.st_mangler_rule_delete', function () {
+        const id = $(this).closest('.st_mangler_effect').data('effect-id');
+        const effect = settings.effects.find(e => e.id === id);
+        if (!effect) return;
+        effect.rules.splice($(this).data('rule-index'), 1);
+        refreshEffectList(settings);
+        context.saveSettingsDebounced();
+    });
+
+    $('#st_mangler_effects').on('click', '.st_mangler_rule_move_up', function () {
+        const id = $(this).closest('.st_mangler_effect').data('effect-id');
+        const effect = settings.effects.find(e => e.id === id);
+        if (!effect) return;
+        moveItem(effect.rules, $(this).data('rule-index'), -1);
+        refreshEffectList(settings);
+        context.saveSettingsDebounced();
+    });
+    $('#st_mangler_effects').on('click', '.st_mangler_rule_move_down', function () {
+        const id = $(this).closest('.st_mangler_effect').data('effect-id');
+        const effect = settings.effects.find(e => e.id === id);
+        if (!effect) return;
+        moveItem(effect.rules, $(this).data('rule-index'), 1);
+        refreshEffectList(settings);
+        context.saveSettingsDebounced();
+    });
+
+    $('#st_mangler_effects').on('click', '.st_mangler_rule_condition_add', function () {
+        const id = $(this).closest('.st_mangler_effect').data('effect-id');
+        const effect = settings.effects.find(e => e.id === id);
+        if (!effect) return;
+        const rule = effect.rules[$(this).data('rule-index')];
+        if (!rule) return;
+        rule.conditions.push({ trackerId: '', minLevel: 0.5 });
+        refreshEffectList(settings);
+        context.saveSettingsDebounced();
+    });
+
+    $('#st_mangler_effects').on('click', '.st_mangler_rule_condition_delete', function () {
+        const id = $(this).closest('.st_mangler_effect').data('effect-id');
+        const effect = settings.effects.find(e => e.id === id);
+        if (!effect) return;
+        const rule = effect.rules[$(this).data('rule-index')];
+        if (!rule) return;
+        rule.conditions.splice($(this).data('cond-index'), 1);
+        refreshEffectList(settings);
+        context.saveSettingsDebounced();
+    });
+
     $('#st_mangler_effects').on('click', '.st_mangler_effect_move_up', function () {
         moveEffect(settings, $(this).closest('.st_mangler_effect').data('effect-id'), -1);
         refreshEffectList(settings);
@@ -739,7 +803,13 @@ export function addSettingsUI() {
         // render time too — without this, repointing an effect at a different tracker leaves the
         // status panel's live controls (active/level/binding) silently acting on the *previous*
         // tracker until some other change happens to force a refresh.
-        if (fieldPath === 'type' || fieldPath === 'llmRewrite.scaleMode' || fieldPath === 'trackerId') {
+        // ruleMode/a rule condition's trackerId or minLevel changes what the effect's own
+        // active/dangling state resolves to (same reasoning as the tracker Dependency panel's
+        // trackerId/minLevel above) — full re-render needed so that stays live. rules.$i.text is
+        // deliberately excluded, same as label/keywords precedent, so typing in it doesn't lose
+        // focus mid-edit.
+        if (fieldPath === 'type' || fieldPath === 'llmRewrite.scaleMode' || fieldPath === 'trackerId'
+            || fieldPath === 'ruleMode' || /^rules\.\d+\.conditions\.\d+\.(trackerId|minLevel)$/.test(fieldPath)) {
             refreshEffectList(settings);
         } else if (fieldPath === 'enabled' || fieldPath === 'label') {
             // Header-row edits that don't re-render the effect list but do change what the

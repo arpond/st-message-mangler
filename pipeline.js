@@ -11,7 +11,7 @@ import {
     matchesKeywordList, applyRegexEffect, applyDrunk, escapeHtmlForDisplay, wordDiffHighlight,
     resolveAwarenessCue, resolveLevelTrend, splitContinuationSuffix, buildRespondingToContext,
     resolveDetectionLevelUpdate, matchesBoundCharacter, resolveChatActiveState, restingLevelValue,
-    meetsDirectionalThreshold,
+    meetsDirectionalThreshold, resolveRuleOutput,
 } from './lib/pure.js';
 
 // Gates which hook is allowed to update a tracker's level — 'user' for onMessageSent,
@@ -94,11 +94,11 @@ function updateAndGetTrackerLevel(tracker, detectionText, prerequisiteMet) {
 // Single point of type dispatch, shared by the real pipeline below and the settings panel's
 // per-effect "Test" button (which runs one effect in isolation at a simulated level, no tracker
 // involved).
-export async function applySingleEffect(text, effect, level, trueOriginal = text, respondingTo = '', recentMessages = []) {
+export async function applySingleEffect(text, effect, level, trueOriginal = text, respondingTo = '', recentMessages = [], ruleInstruction = '') {
     switch (effect.type) {
         case 'regex': return applyRegexEffect(text, effect.regex, warn);
         case 'drunk': return applyDrunk(text, effect.drunk.intensity * level);
-        case 'llm-rewrite': return runLlmRewrite(text, effect, level, trueOriginal, respondingTo, recentMessages);
+        case 'llm-rewrite': return runLlmRewrite(text, effect, level, trueOriginal, respondingTo, recentMessages, ruleInstruction);
         default: return text;
     }
 }
@@ -264,10 +264,20 @@ export async function applyEffects(originalText, message, settings, source, isCo
 
         const { level, trend } = resolvedTrackers.get(tracker.id);
 
+        // effect.rules (phase 2, optional) entirely replaces the single-tracker threshold gate
+        // when present — see resolveRuleOutput. level/trend for placeholder substitution always
+        // stay the primary tracker's, regardless of which rule (if any) matched.
+        const ruleOutput = effect.rules.length > 0
+            ? resolveRuleOutput(effect.rules, effect.ruleMode, resolvedTrackers, trackerById)
+            : null;
+        const active = ruleOutput
+            ? ruleOutput.active
+            : meetsDirectionalThreshold(level, tracker.minLevelToApply, tracker.hitDirection);
+        const ruleInstruction = ruleOutput ? ruleOutput.text : '';
+
         // Awareness cue reflects the effect's true current state regardless of target — an
         // effect can be "active" (driving the narrative cue) without this speaker's message
         // being the one it transforms.
-        const active = meetsDirectionalThreshold(level, tracker.minLevelToApply, tracker.hitDirection);
         updateAwarenessCue(effect, level, active, trend);
 
         if (!effectAppliesToTarget(effect, source)) {
@@ -283,7 +293,9 @@ export async function applyEffects(originalText, message, settings, source, isCo
             continue;
         }
         if (!active) {
-            debugLog(`applyEffects: "${effect.label}" skipped — threshold not reached: level=${level.toFixed(2)}, minLevelToApply=${tracker.minLevelToApply}, hitDirection=${tracker.hitDirection}`);
+            debugLog(ruleOutput
+                ? `applyEffects: "${effect.label}" skipped — no rule matched (ruleMode=${effect.ruleMode}).`
+                : `applyEffects: "${effect.label}" skipped — threshold not reached: level=${level.toFixed(2)}, minLevelToApply=${tracker.minLevelToApply}, hitDirection=${tracker.hitDirection}`);
             continue;
         }
 
@@ -298,7 +310,7 @@ export async function applyEffects(originalText, message, settings, source, isCo
             debugLog(`applyEffects: "${effect.label}" (${effect.type}) proceeding at level=${level.toFixed(2)}`);
         }
         const before = text;
-        text = await applySingleEffect(text, effect, level, originalText, respondingTo, recentMessages);
+        text = await applySingleEffect(text, effect, level, originalText, respondingTo, recentMessages, ruleInstruction);
         debugLog(`applyEffects: "${effect.label}" ${text === before ? 'made no change' : 'changed the text'}.`);
     }
     debugLog(`applyEffects: done — text ${text === originalText ? 'unchanged overall' : 'was rewritten overall'}.`);

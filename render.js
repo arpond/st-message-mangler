@@ -4,7 +4,7 @@ import {
 import { escapeHtmlForDisplay, resolveEffectTracker } from './lib/pure.js';
 import {
     infoIcon, field, renderRowIdentity, renderTriggerPanel, renderTrackerBasicsPanel, renderDependencyPanel,
-    renderTrackerTestPanel, renderTrackerPickerField, renderTypeFields, renderTestPanel,
+    renderTrackerTestPanel, renderTrackerPickerField, renderTypeFields, renderTestPanel, renderRulesPanel,
     EFFECT_TYPE_LABELS, EFFECT_TABS, TRACKER_TABS,
 } from './lib/render.js';
 
@@ -119,6 +119,7 @@ export function renderEffectRow(effect, allTrackers = []) {
                         Level cap sent to model${infoIcon('Some models read the literal maximum {{level}}=1.00/{{level_pct}}=100 as "weak" rather than maximum. This caps what gets substituted into those placeholders (in the llm-rewrite template and the awareness cue) just short of the ceiling — the real level used for trigger/threshold logic elsewhere is untouched. Set to 1 to disable if your model doesn\'t have this quirk.')}
                         ${field('number', 'promptLevelCap', effect.promptLevelCap, 'min="0" max="1" step="0.01" style="max-width: 5em;"')}
                     </label>`)}
+                ${pane('rules', renderRulesPanel(effect, allTrackers))}
                 ${pane('behavior', renderTypeFields(effect))}
                 ${pane('test', renderTestPanel(effect))}
             </div>

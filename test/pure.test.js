@@ -12,6 +12,7 @@ import {
     resolveDetectionLevelUpdate, buildChainPreservationNote, wouldCreateCycle, matchesBoundCharacter,
     resolveChatActiveState, resolveBindableCharacters, restingLevelValue, meetsDirectionalThreshold,
     resolveHitLevel, migrateEffectDependency, resolveLlmMagnitudeScale, resolveEffectTracker,
+    defaultRule, resolveRuleOutput, sanitizeRules,
 } from '../lib/pure.js';
 
 test('clamp01 clamps to [0, 1]', () => {
@@ -913,4 +914,92 @@ test('resolveLlmRatingUpdate: restingLevel high + decrease direction erodes on a
     const trigger = { ...defaultTrackerShape(), llmIntegrationMode: 'cumulative-lock', restingLevel: 'high', hitDirection: 'decrease', llmHitThreshold: 5, incrementPerHit: 0.3, lockThreshold: 0.8 };
     assert.deepEqual(resolveLlmRatingUpdate(0.9, false, 7, trigger), { level: 0.9 - 0.3, locked: false });
     assert.deepEqual(resolveLlmRatingUpdate(0.3, false, 7, trigger), { level: 0, locked: true });
+});
+
+test('defaultRule returns an empty AND-gate with no text', () => {
+    const rule = defaultRule();
+    assert.deepEqual(rule.conditions, []);
+    assert.equal(rule.text, '');
+    assert.match(rule.id, /^rule_/);
+});
+
+test('resolveRuleOutput (first-match): picks the first rule whose every condition is met', () => {
+    const trackerById = new Map([
+        ['a', { ...defaultTrackerShape(), hitDirection: 'increase' }],
+        ['b', { ...defaultTrackerShape(), hitDirection: 'increase' }],
+    ]);
+    const resolvedLevels = new Map([['a', { level: 0.9 }], ['b', { level: 0.1 }]]);
+    const rules = [
+        { conditions: [{ trackerId: 'a', minLevel: 0.5 }, { trackerId: 'b', minLevel: 0.5 }], text: 'both' },
+        { conditions: [{ trackerId: 'a', minLevel: 0.5 }], text: 'a only' },
+    ];
+    const result = resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById);
+    assert.deepEqual(result, { active: true, text: 'a only' });
+});
+
+test('resolveRuleOutput (first-match): a zero-condition rule matches vacuously as a fallback', () => {
+    const trackerById = new Map([['a', { ...defaultTrackerShape() }]]);
+    const resolvedLevels = new Map([['a', { level: 0 }]]);
+    const rules = [
+        { conditions: [{ trackerId: 'a', minLevel: 0.5 }], text: 'a active' },
+        { conditions: [], text: 'otherwise' },
+    ];
+    assert.deepEqual(resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById), { active: true, text: 'otherwise' });
+});
+
+test('resolveRuleOutput (first-match): no rule matches -> inactive, empty text', () => {
+    const trackerById = new Map([['a', { ...defaultTrackerShape() }]]);
+    const resolvedLevels = new Map([['a', { level: 0 }]]);
+    const rules = [{ conditions: [{ trackerId: 'a', minLevel: 0.5 }], text: 'a active' }];
+    assert.deepEqual(resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById), { active: false, text: '' });
+});
+
+test('resolveRuleOutput (stack): joins every matching rule\'s text, in order, and skips blank ones', () => {
+    const trackerById = new Map([
+        ['a', { ...defaultTrackerShape() }],
+        ['b', { ...defaultTrackerShape() }],
+    ]);
+    const resolvedLevels = new Map([['a', { level: 0.9 }], ['b', { level: 0.9 }]]);
+    const rules = [
+        { conditions: [{ trackerId: 'a', minLevel: 0.5 }], text: 'fear' },
+        { conditions: [{ trackerId: 'b', minLevel: 0.5 }], text: '' },
+        { conditions: [{ trackerId: 'a', minLevel: 0.99 }], text: 'unreachable' },
+    ];
+    const result = resolveRuleOutput(rules, 'stack', resolvedLevels, trackerById);
+    assert.equal(result.active, true);
+    assert.equal(result.text, 'fear');
+});
+
+test('resolveRuleOutput: a condition referencing a deleted tracker is dropped, not treated as unmet', () => {
+    const trackerById = new Map([['a', { ...defaultTrackerShape() }]]);
+    const resolvedLevels = new Map([['a', { level: 0.9 }]]);
+    const rules = [{ conditions: [{ trackerId: 'a', minLevel: 0.5 }, { trackerId: 'gone', minLevel: 0.9 }], text: 'matched' }];
+    assert.deepEqual(resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById), { active: true, text: 'matched' });
+});
+
+test('resolveRuleOutput: hitDirection mirroring applies per-condition, using that condition\'s own tracker', () => {
+    const trackerById = new Map([['a', { ...defaultTrackerShape(), hitDirection: 'decrease' }]]);
+    const resolvedLevels = new Map([['a', { level: 0.1 }]]); // low level -> "met" for a decrease-direction 0.5 threshold
+    const rules = [{ conditions: [{ trackerId: 'a', minLevel: 0.5 }], text: 'eroded' }];
+    assert.deepEqual(resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById), { active: true, text: 'eroded' });
+});
+
+test('sanitizeRules resets a non-finite condition minLevel to 0.5 and warns', () => {
+    const rules = [{ conditions: [{ trackerId: 'a', minLevel: 'bad' }], text: '' }];
+    const warnings = [];
+    sanitizeRules(rules, (...args) => warnings.push(args));
+    assert.equal(rules[0].conditions[0].minLevel, 0.5);
+    assert.equal(warnings.length, 1);
+});
+
+test('sanitizeRules clamps an out-of-range condition minLevel into [0, 1]', () => {
+    const rules = [{ conditions: [{ trackerId: 'a', minLevel: 5 }], text: '' }];
+    sanitizeRules(rules, () => {});
+    assert.equal(rules[0].conditions[0].minLevel, 1);
+});
+
+test('sanitizeRules coerces a non-string rule text to an empty string', () => {
+    const rules = [{ conditions: [], text: null }];
+    sanitizeRules(rules, () => {});
+    assert.equal(rules[0].text, '');
 });
