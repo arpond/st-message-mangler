@@ -4,6 +4,20 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v39
+
+- **Flipped the settings-panel re-render rule from opt-in to opt-out** — the delegated field-change
+  handlers in `settingsUI.js` used to decide whether to re-render the tracker/effect list via an
+  explicit allowlist of field names; every field not on the list silently skipped re-rendering,
+  which twice let a status line (dependency `minLevel`, and `dependsOnMinLevel` before it) go
+  stale until an unrelated change forced a refresh. Now every field re-renders by default except a
+  small opt-out list of freeform-typed fields with no other displayed dependency (prompt text,
+  keyword lists, thresholds, etc.) — a missed case now just re-renders slightly more than
+  necessary instead of silently showing stale text. Incidentally fixes a real instance of the same
+  bug class found while enumerating fields: switching a tracker's **Hit behavior** between
+  Gradual/Jump left the Increment-per-hit row's visibility stale, since `hitBehavior` wasn't on the
+  old allowlist.
+
 ## v38
 
 - **Renamed the "Track only" effect type to "Awareness only"** — the label was left over from

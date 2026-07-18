@@ -20,6 +20,34 @@ import {
 } from './render.js';
 import { refreshStatusPanelContents, toggleStatusPanel } from './statusPanel.js';
 
+// Fields whose delegated field-change handler (below) should NOT trigger a full tracker/effect
+// list re-render — typed/dragged character-by-character or step-by-step controls where no other
+// displayed element (a status line, a sibling's picker, a computed label) reads their live value,
+// so re-rendering mid-edit would only cost focus/cursor position for no benefit. Every other
+// field defaults to a full re-render now — see DEVELOPMENT.md/IMPROVEMENT_TRACKER.md: an opt-out
+// list degrades a missed case to "re-renders slightly more than necessary" instead of the
+// opt-in allowlist's failure mode, "silently shows stale text" (bit twice: dependency minLevel,
+// and dependsOnMinLevel before it). `dependencies.*.minLevel`/`rules.*.conditions.*.minLevel`
+// are deliberately NOT opted out despite being typed numbers — the dependency/rule status text
+// embeds their value directly.
+const TRACKER_NO_RERENDER_FIELDS = {
+    exact: new Set([
+        'keywords', 'llmCondition', 'llmHitThreshold', 'lockThreshold', 'llmLookback',
+        'incrementPerHit', 'decayPerTurn', 'minLevelToApply', 'dispelKeywords', 'maxTurnsActive',
+    ]),
+    patterns: [],
+};
+const EFFECT_NO_RERENDER_FIELDS = {
+    exact: new Set([
+        'awarenessCue', 'promptLevelCap', 'regex.pattern', 'regex.flags', 'regex.replacement',
+        'drunk.intensity', 'llmRewrite.promptTemplate', 'llmRewrite.sceneLookback', 'llmRewrite.maxResponseTokens',
+    ]),
+    patterns: [/^llmRewrite\.scaleSteps\.\d+\.(threshold|text)$/, /^rules\.\d+\.text$/],
+};
+function isOptedOutField(fieldPath, { exact, patterns }) {
+    return exact.has(fieldPath) || patterns.some(re => re.test(fieldPath));
+}
+
 export function refreshTrackerList(settings) {
     $('#st_mangler_trackers').html(renderTrackerList(settings));
     // Structural changes (add/delete/reorder/mode swaps) can change which trackers the floating
@@ -522,22 +550,18 @@ export function addSettingsUI() {
             log(`"${tracker.label}" unlocked — lock threshold raised above its current level.`);
         }
 
-        // mode/detector/llmIntegrationMode changes swap visible sub-fields — full row re-render
-        // needed. A dependency row's trackerId pick also needs it: re-evaluates the
-        // broken/blocked status line, and every OTHER tracker's own dependency picker needs its
-        // cycle-safe/already-chosen option list re-evaluated as the graph changes. minLevel needs
-        // it too — the blocked-status text embeds the configured value directly ("waiting for X
-        // to reach level <minLevel>"), and raising/lowering it can flip whether the prerequisite
-        // is currently satisfied at all, so the caution icon can go stale exactly like the
-        // trackerId case if this isn't included.
-        if (fieldPath === 'mode' || fieldPath === 'detector' || fieldPath === 'llmIntegrationMode' || /^dependencies\.\d+\.(trackerId|minLevel)$/.test(fieldPath)) {
-            refreshTrackerList(settings);
-        } else if (fieldPath === 'enabled' || fieldPath === 'label') {
-            // Header-row edits that don't re-render the tracker list but do change what the
-            // floating status panel shows, and (label only) what Effects' tracker-picker options
-            // display.
+        // enabled/label are header-row edits that don't re-render the tracker list but do change
+        // what the floating status panel shows, and (label only) what Effects' tracker-picker
+        // options display. Everything else defaults to a full re-render (see
+        // TRACKER_NO_RERENDER_FIELDS above for the opt-out) — covers mode/detector/
+        // llmIntegrationMode swapping visible sub-fields, a dependency row's trackerId/minLevel
+        // re-evaluating the broken/blocked status line and every other tracker's picker options,
+        // and e.g. hitBehavior toggling the Increment-per-hit row's visibility.
+        if (fieldPath === 'enabled' || fieldPath === 'label') {
             refreshStatusPanelContents(settings);
             if (fieldPath === 'label') refreshEffectList(settings);
+        } else if (!isOptedOutField(fieldPath, TRACKER_NO_RERENDER_FIELDS)) {
+            refreshTrackerList(settings);
         }
     });
 
@@ -797,24 +821,17 @@ export function addSettingsUI() {
         setFieldByPath(effect, fieldPath, value);
         context.saveSettingsDebounced();
 
-        // type/llmRewrite.scaleMode changes swap visible sub-fields — full row re-render needed.
-        // trackerId also needs it: the header's dangling-tracker warning is only evaluated at
-        // render time, and the floating status panel bakes data-tracker-id into its row markup at
-        // render time too — without this, repointing an effect at a different tracker leaves the
-        // status panel's live controls (active/level/binding) silently acting on the *previous*
-        // tracker until some other change happens to force a refresh.
-        // ruleMode/a rule condition's trackerId or minLevel changes what the effect's own
-        // active/dangling state resolves to (same reasoning as the tracker Dependency panel's
-        // trackerId/minLevel above) — full re-render needed so that stays live. rules.$i.text is
-        // deliberately excluded, same as label/keywords precedent, so typing in it doesn't lose
-        // focus mid-edit.
-        if (fieldPath === 'type' || fieldPath === 'llmRewrite.scaleMode' || fieldPath === 'trackerId'
-            || fieldPath === 'ruleMode' || /^rules\.\d+\.conditions\.\d+\.(trackerId|minLevel)$/.test(fieldPath)) {
-            refreshEffectList(settings);
-        } else if (fieldPath === 'enabled' || fieldPath === 'label') {
-            // Header-row edits that don't re-render the effect list but do change what the
-            // floating status panel shows (which effects are listed / their labels).
+        // enabled/label are header-row edits that don't re-render the effect list but do change
+        // what the floating status panel shows (which effects are listed / their labels).
+        // Everything else defaults to a full re-render (see EFFECT_NO_RERENDER_FIELDS above for
+        // the opt-out) — covers type/llmRewrite.scaleMode swapping visible sub-fields, trackerId
+        // (the dangling-tracker warning and the status panel's data-tracker-id both bake in at
+        // render time), and ruleMode/a rule condition's trackerId or minLevel changing the
+        // effect's own active/dangling state.
+        if (fieldPath === 'enabled' || fieldPath === 'label') {
             refreshStatusPanelContents(settings);
+        } else if (!isOptedOutField(fieldPath, EFFECT_NO_RERENDER_FIELDS)) {
+            refreshEffectList(settings);
         }
     });
 }
