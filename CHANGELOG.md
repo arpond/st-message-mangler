@@ -11,6 +11,17 @@ successive rounds of development.
   Effect of this type only ever drives an awareness cue/status badge, never "tracks" anything
   itself. `type: 'none'` unchanged, no migration needed — label/copy only.
 
+## v37
+
+- **`debugLog` no longer re-derives settings on every call** — it read the raw stored `debug`
+  flag directly instead of going through `getSettings()`, which reruns full migration/backfill/
+  sanitize over every tracker and effect on every call; `debugLog` fires roughly 27 times per
+  message, so this was a real per-message cost even with debug logging off.
+- **Skipped eager debug-string construction in `applyEffects`** — the per-tracker
+  character-binding diagnostic block (`JSON.stringify` calls plus a character-roster scan) is now
+  gated behind a new `isDebugEnabled()` check, so it's skipped entirely rather than built and
+  discarded on every message when debug logging is off.
+
 ## v36
 
 - **Rule-composition layer for Effects (phase 2 of the Tracker/Effect split)** — an optional new
