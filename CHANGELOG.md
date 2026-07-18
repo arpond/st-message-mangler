@@ -8,17 +8,22 @@ successive rounds of development.
 
 - **Rule-composition layer for Effects (phase 2 of the Tracker/Effect split)** — an optional new
   **Rules** tab per effect lets it react to *combinations* of Trackers, not just its own required
-  one. Each rule is an AND-gate over one or more `tracker + minimum level` conditions plus an
-  instruction fragment, exposed to `llm-rewrite` templates as a new `{{rule_instruction}}`
-  placeholder (a no-op for `regex`/`drunk`). Rules resolve in order — **First match wins**
-  (default) uses the first fully-satisfied rule's text; **Stack all matches** instead joins every
-  matching rule's text together. A rule with no conditions matches vacuously, useful as an explicit
-  "otherwise" fallback at the end of a first-match list.
+  one. Each rule is an AND-gate over one or more `tracker + minimum level` conditions plus
+  instruction text. Rules resolve in order — **First match wins** (default) uses the first
+  fully-satisfied rule's text; **Stack all matches** instead joins every matching rule's text
+  together. A rule with no conditions matches vacuously, useful as an explicit "otherwise" fallback
+  at the end of a first-match list.
+  - For `llm-rewrite` effects, a matching rule's text becomes `{{scale_instruction}}` — the *same*
+    placeholder Structured steps already fills in from a threshold list, entirely replacing that
+    threshold lookup once any rules exist rather than adding a second, separate placeholder that
+    would need reconciling in the template. `regex`/`drunk` effects ignore the text (nothing to
+    substitute it into) but are still gated by rules the same way.
   - Purely additive: an effect with no rules (every existing effect, unchanged) behaves exactly as
-    before — its own tracker's **Min level to apply** still gates it. Adding a rule to an effect
-    hands that gate entirely to its rules from then on; the effect's primary tracker still always
-    supplies `{{level}}`/`{{level_pct}}`/`{{trend}}`, chat-activation, and character binding either
-    way. No settings migration needed.
+    before — its own tracker's **Min level to apply** still gates it, and Structured steps (if
+    configured) still resolves `{{scale_instruction}}` normally. Adding a rule hands both of those
+    over to the rules from then on; the effect's primary tracker still always supplies
+    `{{level}}`/`{{level_pct}}`/`{{trend}}`, chat-activation, and character binding either way. No
+    settings migration needed.
   - A rule condition referencing a since-deleted tracker is dropped from that rule's AND-gate
     (fails open), same precedent as a broken Tracker dependency.
   - This is the deterministic alternative to reconciling several `llm-rewrite` effects' freeform

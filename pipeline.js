@@ -94,11 +94,15 @@ function updateAndGetTrackerLevel(tracker, detectionText, prerequisiteMet) {
 // Single point of type dispatch, shared by the real pipeline below and the settings panel's
 // per-effect "Test" button (which runs one effect in isolation at a simulated level, no tracker
 // involved).
-export async function applySingleEffect(text, effect, level, trueOriginal = text, respondingTo = '', recentMessages = [], ruleInstruction = '') {
+// ruleText: null when this effect has no rules configured (the common case — runLlmRewrite falls
+// back to its normal scaleMode/scaleSteps resolution); a string (possibly empty) when it does —
+// the matched rule's text then becomes runLlmRewrite's {{scale_instruction}}, entirely replacing
+// the threshold-based scaleSteps lookup for this call. See applyEffects' Phase B.
+export async function applySingleEffect(text, effect, level, trueOriginal = text, respondingTo = '', recentMessages = [], ruleText = null) {
     switch (effect.type) {
         case 'regex': return applyRegexEffect(text, effect.regex, warn);
         case 'drunk': return applyDrunk(text, effect.drunk.intensity * level);
-        case 'llm-rewrite': return runLlmRewrite(text, effect, level, trueOriginal, respondingTo, recentMessages, ruleInstruction);
+        case 'llm-rewrite': return runLlmRewrite(text, effect, level, trueOriginal, respondingTo, recentMessages, ruleText);
         default: return text;
     }
 }
@@ -273,7 +277,9 @@ export async function applyEffects(originalText, message, settings, source, isCo
         const active = ruleOutput
             ? ruleOutput.active
             : meetsDirectionalThreshold(level, tracker.minLevelToApply, tracker.hitDirection);
-        const ruleInstruction = ruleOutput ? ruleOutput.text : '';
+        // null (not '') when no rules are configured — runLlmRewrite tells the two cases apart to
+        // decide whether to fall back to scaleMode/scaleSteps or use this (possibly empty) text.
+        const ruleText = ruleOutput ? ruleOutput.text : null;
 
         // Awareness cue reflects the effect's true current state regardless of target — an
         // effect can be "active" (driving the narrative cue) without this speaker's message
@@ -310,7 +316,7 @@ export async function applyEffects(originalText, message, settings, source, isCo
             debugLog(`applyEffects: "${effect.label}" (${effect.type}) proceeding at level=${level.toFixed(2)}`);
         }
         const before = text;
-        text = await applySingleEffect(text, effect, level, originalText, respondingTo, recentMessages, ruleInstruction);
+        text = await applySingleEffect(text, effect, level, originalText, respondingTo, recentMessages, ruleText);
         debugLog(`applyEffects: "${effect.label}" ${text === before ? 'made no change' : 'changed the text'}.`);
     }
     debugLog(`applyEffects: done — text ${text === originalText ? 'unchanged overall' : 'was rewritten overall'}.`);

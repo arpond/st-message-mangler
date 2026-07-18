@@ -162,10 +162,10 @@ it onto a range — it's just handed the one instruction that already applies. `
 `{{level_pct}}` remain available in Structured steps mode too, for any part of the template that
 still wants the raw number.
 
-A related but separate placeholder, `{{rule_instruction}}`, resolves the same way but comes from
-the effect's **Rules** tab instead of Structured steps — see "Effect rules — reacting to
-combinations of Trackers" below. It's empty (a no-op) unless the effect has at least one rule
-configured.
+The effect's **Rules** tab (see "Effect rules — reacting to combinations of Trackers" below) can
+also feed `{{scale_instruction}}` — when the effect has any rules configured, the matching rule's
+text is used instead of the Structured-steps threshold lookup, same placeholder either way, so a
+template never has to know or care which one supplied it.
 
 Building a ladder of several steps by hand gets tedious — the **Generate** control above the step
 list fills in N steps at computed thresholds in one click (Linear: evenly spaced; Exponential:
@@ -373,20 +373,26 @@ Every effect has one required Tracker (Basics tab) — that tracker still always
 on this tab. The optional **Rules** tab lets that *same* effect additionally react to
 combinations of *other* trackers too, without needing separate effects per combination. Each rule
 is one or more conditions (tracker + minimum level, AND-gate — every listed tracker must meet its
-own minimum) plus an instruction fragment available to `llm-rewrite` templates as
-`{{rule_instruction}}` (ignored by `regex`/`drunk` effects). Rules are evaluated in order:
+own minimum) plus instruction text. For an `llm-rewrite` effect, a matching rule's text becomes
+`{{scale_instruction}}` — the *same* placeholder Structured steps fills in from a threshold list,
+so there's nothing to reconcile in the template: whichever mechanism is active for this effect
+(Structured steps, or Rules once any are configured) supplies that one placeholder, never both at
+once. `regex`/`drunk` effects ignore rule text (nothing to substitute it into) but still get
+gated by rules the same way. Rules are evaluated in order:
 
 - **First match wins** (default) — the first rule whose every condition is satisfied is used;
   later rules are never checked. A rule with *no* conditions always matches, so putting one last
   gives you an explicit "otherwise" fallback. This is how "if A and B, do X; if just A, do Y; if
   just B, do Z" gets expressed: three ordered rules, each naming its own condition set.
-- **Stack all matches** — instead of stopping at the first match, every matching rule's
-  instruction text is joined together and all of them count as "active."
+- **Stack all matches** — instead of stopping at the first match, every matching rule's text is
+  joined together into `{{scale_instruction}}` and all of them count as "active."
 
 Empty rules (the default for every effect) leaves this effect's activity gated exactly the way it
-always was — its own tracker's **Min level to apply** (Trigger tab). The moment a rule is added,
-rules take over that gate completely for this effect; the tracker's own `minLevelToApply` is no
-longer consulted for it (other effects still using that tracker directly are unaffected). A rule
+always was — its own tracker's **Min level to apply** (Trigger tab), and (for `llm-rewrite`)
+`{{scale_instruction}}` still comes from Structured steps if that's configured. The moment a rule
+is added, rules take over both: the effect's own tracker's `minLevelToApply` is no longer
+consulted for it, and Structured steps' threshold lookup is bypassed in favor of whichever rule
+matched (other effects still using that tracker or those steps directly are unaffected). A rule
 condition referencing a tracker that's since been deleted is dropped from that rule's AND-gate
 (fails open), same as a broken Tracker dependency.
 
