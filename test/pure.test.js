@@ -6,7 +6,8 @@ import {
     resolveLevelTrend,
     resolveScaleStep, splitContinuationSuffix, generateScaleSteps, sanitizeScaleSteps,
     buildRespondingToContext, buildSceneContext,
-    defaultTrigger, defaultEffectShape, defaultEffect, DEFAULT_SETTINGS, migrateLegacySettings,
+    defaultTrackerShape, defaultTracker, defaultEffectShape, defaultEffect, DEFAULT_SETTINGS, migrateLegacySettings,
+    migrateEffectsToTrackers,
     wrapUntrusted, INJECTION_GUARD, withTimeout, extractRating, resolveLlmRatingUpdate,
     resolveDetectionLevelUpdate, buildChainPreservationNote, wouldCreateCycle, matchesBoundCharacter,
     resolveChatActiveState, resolveBindableCharacters, restingLevelValue, meetsDirectionalThreshold,
@@ -19,17 +20,26 @@ test('clamp01 clamps to [0, 1]', () => {
     assert.equal(clamp01(1.5), 1);
 });
 
-test('defaultTrigger returns the always/keyword baseline shape', () => {
-    const trigger = defaultTrigger();
-    assert.equal(trigger.mode, 'always');
-    assert.equal(trigger.detector, 'keyword');
-    assert.equal(trigger.detectSource, 'both');
+test('defaultTrackerShape returns the always/keyword baseline shape', () => {
+    const tracker = defaultTrackerShape();
+    assert.equal(tracker.mode, 'always');
+    assert.equal(tracker.detector, 'keyword');
+    assert.equal(tracker.detectSource, 'both');
 });
 
-test('defaultEffectShape embeds a fresh defaultTrigger and type-specific fields', () => {
+test('defaultTracker adds a unique id on top of defaultTrackerShape', () => {
+    const a = defaultTracker();
+    const b = defaultTracker();
+    assert.match(a.id, /^tracker_/);
+    assert.notEqual(a.id, b.id);
+    assert.equal(a.mode, 'always');
+});
+
+test('defaultEffectShape has no tracking config — trackerId placeholder plus type-specific fields', () => {
     const shape = defaultEffectShape('drunk');
     assert.equal(shape.type, 'drunk');
-    assert.equal(shape.trigger.mode, 'always');
+    assert.equal(shape.trackerId, null);
+    assert.equal(shape.trigger, undefined);
     assert.equal(shape.drunk.intensity, 0.3);
     assert.equal(shape.llmRewrite.scaleMode, 'freeform');
 });
@@ -49,31 +59,111 @@ test('migrateLegacySettings is a no-op once effects[] already exists', () => {
     assert.equal(settings.effects[0].id, 'x');
 });
 
-test('migrateLegacySettings converts legacy rules[] into regex effects', () => {
+test('migrateLegacySettings converts legacy rules[] into a regex effect paired with a tracker', () => {
     const settings = { rules: [{ label: 'swap', enabled: true, pattern: 'a', flags: 'gi', replacement: 'b' }] };
     const logs = [];
     migrateLegacySettings(settings, (...args) => logs.push(args));
     assert.equal(settings.effects.length, 1);
+    assert.equal(settings.trackers.length, 1);
     assert.equal(settings.effects[0].type, 'regex');
     assert.equal(settings.effects[0].label, 'swap');
     assert.equal(settings.effects[0].regex.pattern, 'a');
+    assert.equal(settings.effects[0].trackerId, settings.trackers[0].id);
     assert.equal(settings.rules, undefined);
     assert.equal(logs.length, 1);
 });
 
-test('migrateLegacySettings converts legacy drunkMode into a drunk effect', () => {
+test('migrateLegacySettings converts legacy drunkMode into a drunk effect paired with a tracker', () => {
     const settings = { drunkMode: { enabled: true, intensity: 0.7, progression: { mode: 'progressive' } } };
     migrateLegacySettings(settings);
     assert.equal(settings.effects.length, 1);
+    assert.equal(settings.trackers.length, 1);
     assert.equal(settings.effects[0].type, 'drunk');
     assert.equal(settings.effects[0].drunk.intensity, 0.7);
-    assert.equal(settings.effects[0].trigger.mode, 'progressive');
+    assert.equal(settings.trackers[0].mode, 'progressive');
+    assert.equal(settings.effects[0].trackerId, settings.trackers[0].id);
     assert.equal(settings.drunkMode, undefined);
 });
 
-test('DEFAULT_SETTINGS starts with no effects and debug off', () => {
+test('DEFAULT_SETTINGS starts with no trackers/effects and debug off', () => {
+    assert.deepEqual(DEFAULT_SETTINGS.trackers, []);
     assert.deepEqual(DEFAULT_SETTINGS.effects, []);
     assert.equal(DEFAULT_SETTINGS.debug, false);
+});
+
+test('migrateEffectsToTrackers is a no-op once settings.trackers already exists', () => {
+    const settings = { trackers: [{ id: 't1' }], effects: [{ id: 'e1', trackerId: 't1' }] };
+    migrateEffectsToTrackers(settings);
+    assert.equal(settings.trackers.length, 1);
+    assert.equal(settings.effects.length, 1);
+});
+
+test('migrateEffectsToTrackers splits a fused effect into a tracker (keeping the old id) and a slimmer effect', () => {
+    const settings = {
+        effects: [{
+            id: 'effect_1',
+            label: 'Tense',
+            enabled: true,
+            type: 'llm-rewrite',
+            target: 'both',
+            chatActivationMode: 'manual',
+            awarenessCue: 'she is tense',
+            promptLevelCap: 0.99,
+            // A real pre-split trigger never had chatActivationMode — that only lived on the
+            // fused effect's top level (see the chatActivationMode field above) — so this fixture
+            // deliberately omits it from `trigger`, unlike defaultTrackerShape()'s own defaults.
+            trigger: { mode: 'progressive', detector: 'keyword', keywords: 'tense', dispelKeywords: '', dependencies: [] },
+            regex: { pattern: '', flags: 'gi', replacement: '' },
+            drunk: { intensity: 0.3 },
+            llmRewrite: { promptTemplate: 'x', scaleMode: 'freeform', scaleSteps: [], sceneLookback: 4, maxResponseTokens: 600 },
+        }],
+    };
+    const logs = [];
+    migrateEffectsToTrackers(settings, (...args) => logs.push(args));
+
+    assert.equal(settings.trackers.length, 1);
+    const tracker = settings.trackers[0];
+    assert.equal(tracker.id, 'effect_1'); // preserves the original id so chatMetadata keys carry over untouched
+    assert.equal(tracker.label, 'Tense'); // label lived on the fused effect's top level, not under .trigger
+    assert.equal(tracker.mode, 'progressive');
+    assert.equal(tracker.keywords, 'tense');
+    assert.equal(tracker.chatActivationMode, 'manual');
+    assert.equal(tracker.trigger, undefined);
+
+    assert.equal(settings.effects.length, 1);
+    const effect = settings.effects[0];
+    assert.notEqual(effect.id, 'effect_1'); // freshly minted, nothing was keyed by a "behavior id" before
+    assert.equal(effect.trackerId, 'effect_1');
+    assert.equal(effect.awarenessCue, 'she is tense');
+    assert.equal(effect.trigger, undefined);
+    assert.equal(effect.chatActivationMode, undefined);
+    assert.equal(logs.length, 1);
+});
+
+test('migrateEffectsToTrackers renames dependency references from effectId to trackerId', () => {
+    const settings = {
+        effects: [{
+            id: 'effect_1', label: '', enabled: true, type: 'none', target: 'user', awarenessCue: '', promptLevelCap: 0.99,
+            trigger: { ...defaultTrackerShape(), dependencies: [{ effectId: 'effect_2', minLevel: 0.6 }] },
+            regex: { pattern: '', flags: 'gi', replacement: '' }, drunk: { intensity: 0.3 },
+            llmRewrite: { promptTemplate: '', scaleMode: 'freeform', scaleSteps: [], sceneLookback: 4, maxResponseTokens: 600 },
+        }],
+    };
+    migrateEffectsToTrackers(settings);
+    assert.deepEqual(settings.trackers[0].dependencies, [{ trackerId: 'effect_2', minLevel: 0.6 }]);
+});
+
+test('migrateEffectsToTrackers normalizes a legacy single dependsOnEffectId during the split', () => {
+    const settings = {
+        effects: [{
+            id: 'effect_1', label: '', enabled: true, type: 'none', target: 'user', awarenessCue: '', promptLevelCap: 0.99,
+            trigger: { ...defaultTrackerShape(), dependencies: undefined, dependsOnEffectId: 'effect_2', dependsOnMinLevel: 0.4 },
+            regex: { pattern: '', flags: 'gi', replacement: '' }, drunk: { intensity: 0.3 },
+            llmRewrite: { promptTemplate: '', scaleMode: 'freeform', scaleSteps: [], sceneLookback: 4, maxResponseTokens: 600 },
+        }],
+    };
+    migrateEffectsToTrackers(settings);
+    assert.deepEqual(settings.trackers[0].dependencies, [{ trackerId: 'effect_2', minLevel: 0.4 }]);
 });
 
 test('matchesKeywordList matches whole words, case-insensitively', () => {
@@ -384,23 +474,23 @@ test('sanitizeScaleSteps clamps out-of-range thresholds into [0, 1]', () => {
 });
 
 test('migrateEffectDependency converts a legacy single dependsOnEffectId into the dependencies array', () => {
-    const trigger = { dependsOnEffectId: 'other', dependsOnMinLevel: 0.7 };
-    migrateEffectDependency(trigger);
-    assert.deepEqual(trigger.dependencies, [{ effectId: 'other', minLevel: 0.7 }]);
-    assert.equal('dependsOnEffectId' in trigger, false);
-    assert.equal('dependsOnMinLevel' in trigger, false);
+    const tracker = { dependsOnEffectId: 'other', dependsOnMinLevel: 0.7 };
+    migrateEffectDependency(tracker);
+    assert.deepEqual(tracker.dependencies, [{ trackerId: 'other', minLevel: 0.7 }]);
+    assert.equal('dependsOnEffectId' in tracker, false);
+    assert.equal('dependsOnMinLevel' in tracker, false);
 });
 
 test('migrateEffectDependency with no legacy dependency defaults to an empty array', () => {
-    const trigger = { dependsOnEffectId: '' };
-    migrateEffectDependency(trigger);
-    assert.deepEqual(trigger.dependencies, []);
+    const tracker = { dependsOnEffectId: '' };
+    migrateEffectDependency(tracker);
+    assert.deepEqual(tracker.dependencies, []);
 });
 
 test('migrateEffectDependency is a no-op once dependencies is already an array', () => {
-    const trigger = { dependencies: [{ effectId: 'x', minLevel: 0.3 }] };
-    migrateEffectDependency(trigger);
-    assert.deepEqual(trigger.dependencies, [{ effectId: 'x', minLevel: 0.3 }]);
+    const tracker = { dependencies: [{ trackerId: 'x', minLevel: 0.3 }] };
+    migrateEffectDependency(tracker);
+    assert.deepEqual(tracker.dependencies, [{ trackerId: 'x', minLevel: 0.3 }]);
 });
 
 test('sanitizeScaleSteps coerces a non-string text to an empty string', () => {
@@ -497,19 +587,19 @@ test('extractRating clamps an out-of-range value to [0, 10] and returns null whe
 });
 
 test('resolveLlmRatingUpdate: absolute mode sets level directly from the rating', () => {
-    const trigger = { ...defaultTrigger(), llmIntegrationMode: 'absolute' };
+    const trigger = { ...defaultTrackerShape(), llmIntegrationMode: 'absolute' };
     assert.deepEqual(resolveLlmRatingUpdate(0.2, false, 7, trigger), { level: 0.7, locked: false });
 });
 
 test('resolveLlmRatingUpdate: cumulative mode increments on a hit, decays otherwise', () => {
-    const trigger = { ...defaultTrigger(), llmIntegrationMode: 'cumulative', llmHitThreshold: 5, incrementPerHit: 0.3, decayPerTurn: 0.05 };
+    const trigger = { ...defaultTrackerShape(), llmIntegrationMode: 'cumulative', llmHitThreshold: 5, incrementPerHit: 0.3, decayPerTurn: 0.05 };
     assert.deepEqual(resolveLlmRatingUpdate(0.2, false, 7, trigger), { level: 0.5, locked: false });
     assert.deepEqual(resolveLlmRatingUpdate(0.2, false, 2, trigger), { level: 0.2 - 0.05, locked: false });
 });
 
 test('resolveLlmRatingUpdate: cumulative-lock locks once level crosses lockThreshold', () => {
     const trigger = {
-        ...defaultTrigger(), llmIntegrationMode: 'cumulative-lock',
+        ...defaultTrackerShape(), llmIntegrationMode: 'cumulative-lock',
         llmHitThreshold: 5, incrementPerHit: 0.3, decayPerTurn: 0.05, lockThreshold: 0.8,
     };
     assert.deepEqual(resolveLlmRatingUpdate(0.6, false, 7, trigger), { level: 0.6 + 0.3, locked: true });
@@ -519,7 +609,7 @@ test('resolveLlmRatingUpdate: cumulative-lock locks once level crosses lockThres
 });
 
 test('resolveDetectionLevelUpdate: dispel keyword forces level/turnsActive to 0', () => {
-    const trigger = { ...defaultTrigger(), dispelKeywords: 'stop' };
+    const trigger = { ...defaultTrackerShape(), dispelKeywords: 'stop' };
     assert.deepEqual(
         resolveDetectionLevelUpdate(0.5, 3, 'please stop now', trigger),
         { level: 0, turnsActive: 0, dispelled: true, autoDispelled: false },
@@ -527,7 +617,7 @@ test('resolveDetectionLevelUpdate: dispel keyword forces level/turnsActive to 0'
 });
 
 test('resolveDetectionLevelUpdate: keyword detector increments/decays like resolveLlmRatingUpdate', () => {
-    const trigger = { ...defaultTrigger(), detector: 'keyword', keywords: 'tree', incrementPerHit: 0.3, decayPerTurn: 0.05, minLevelToApply: 0.05 };
+    const trigger = { ...defaultTrackerShape(), detector: 'keyword', keywords: 'tree', incrementPerHit: 0.3, decayPerTurn: 0.05, minLevelToApply: 0.05 };
     assert.deepEqual(
         resolveDetectionLevelUpdate(0.2, 0, 'a tree grows here', trigger),
         { level: 0.2 + 0.3, turnsActive: 1, dispelled: false, autoDispelled: false },
@@ -539,7 +629,7 @@ test('resolveDetectionLevelUpdate: keyword detector increments/decays like resol
 });
 
 test('resolveDetectionLevelUpdate: llm detector leaves level unchanged but still tracks turnsActive', () => {
-    const trigger = { ...defaultTrigger(), detector: 'llm', minLevelToApply: 0.05 };
+    const trigger = { ...defaultTrackerShape(), detector: 'llm', minLevelToApply: 0.05 };
     assert.deepEqual(
         resolveDetectionLevelUpdate(0.4, 2, 'anything', trigger),
         { level: 0.4, turnsActive: 3, dispelled: false, autoDispelled: false },
@@ -547,7 +637,7 @@ test('resolveDetectionLevelUpdate: llm detector leaves level unchanged but still
 });
 
 test('resolveDetectionLevelUpdate: inactive level resets turnsActive to 0', () => {
-    const trigger = { ...defaultTrigger(), detector: 'llm', minLevelToApply: 0.5 };
+    const trigger = { ...defaultTrackerShape(), detector: 'llm', minLevelToApply: 0.5 };
     assert.deepEqual(
         resolveDetectionLevelUpdate(0.2, 4, 'anything', trigger),
         { level: 0.2, turnsActive: 0, dispelled: false, autoDispelled: false },
@@ -555,7 +645,7 @@ test('resolveDetectionLevelUpdate: inactive level resets turnsActive to 0', () =
 });
 
 test('resolveDetectionLevelUpdate: autoDispelled once turnsActive exceeds maxTurnsActive', () => {
-    const trigger = { ...defaultTrigger(), detector: 'llm', minLevelToApply: 0.05, maxTurnsActive: 3 };
+    const trigger = { ...defaultTrackerShape(), detector: 'llm', minLevelToApply: 0.05, maxTurnsActive: 3 };
     assert.deepEqual(
         resolveDetectionLevelUpdate(0.4, 3, 'anything', trigger),
         { level: 0.4, turnsActive: 4, dispelled: false, autoDispelled: true },
@@ -573,45 +663,45 @@ test('buildChainPreservationNote returns a preserve-existing-changes instruction
 });
 
 function fx(id, ...dependsOnIds) {
-    return { id, trigger: { dependencies: dependsOnIds.map(effectId => ({ effectId, minLevel: 0.5 })) } };
+    return { id, dependencies: dependsOnIds.map(trackerId => ({ trackerId, minLevel: 0.5 })) };
 }
 
 test('wouldCreateCycle detects a direct cycle (A depends on B, B would depend on A)', () => {
-    const effects = [fx('a'), fx('b', 'a')];
-    assert.equal(wouldCreateCycle(effects, 'a', 'b'), true);
+    const trackers = [fx('a'), fx('b', 'a')];
+    assert.equal(wouldCreateCycle(trackers, 'a', 'b'), true);
 });
 
 test('wouldCreateCycle detects a longer chain (A -> B -> C -> A)', () => {
-    const effects = [fx('a'), fx('b', 'c'), fx('c', 'a')];
-    assert.equal(wouldCreateCycle(effects, 'a', 'b'), true);
+    const trackers = [fx('a'), fx('b', 'c'), fx('c', 'a')];
+    assert.equal(wouldCreateCycle(trackers, 'a', 'b'), true);
 });
 
 test('wouldCreateCycle flags depending on self', () => {
-    const effects = [fx('a')];
-    assert.equal(wouldCreateCycle(effects, 'a', 'a'), true);
+    const trackers = [fx('a')];
+    assert.equal(wouldCreateCycle(trackers, 'a', 'a'), true);
 });
 
 test('wouldCreateCycle allows a non-cyclic dependency', () => {
-    const effects = [fx('a'), fx('b'), fx('c', 'b')];
-    assert.equal(wouldCreateCycle(effects, 'a', 'c'), false);
+    const trackers = [fx('a'), fx('b'), fx('c', 'b')];
+    assert.equal(wouldCreateCycle(trackers, 'a', 'c'), false);
 });
 
 test('wouldCreateCycle does not treat a dangling reference mid-chain as a cycle', () => {
-    const effects = [fx('a'), fx('b', 'missing')];
-    assert.equal(wouldCreateCycle(effects, 'a', 'b'), false);
+    const trackers = [fx('a'), fx('b', 'missing')];
+    assert.equal(wouldCreateCycle(trackers, 'a', 'b'), false);
 });
 
 test('wouldCreateCycle walks all of a node\'s multiple dependencies, not just one', () => {
     // c depends on both a and d; d has no dependencies. a depending on c should cycle (via c -> a).
-    const effects = [fx('a'), fx('c', 'a', 'd'), fx('d')];
-    assert.equal(wouldCreateCycle(effects, 'a', 'c'), true);
+    const trackers = [fx('a'), fx('c', 'a', 'd'), fx('d')];
+    assert.equal(wouldCreateCycle(trackers, 'a', 'c'), true);
     // b depending on c should NOT cycle (c's dependencies never reach b).
-    const effects2 = [fx('b'), fx('c', 'a', 'd'), fx('a'), fx('d')];
-    assert.equal(wouldCreateCycle(effects2, 'b', 'c'), false);
+    const trackers2 = [fx('b'), fx('c', 'a', 'd'), fx('a'), fx('d')];
+    assert.equal(wouldCreateCycle(trackers2, 'b', 'c'), false);
 });
 
 test('resolveDetectionLevelUpdate: unmet prerequisite treats a keyword hit as a no-hit (still decays)', () => {
-    const trigger = { ...defaultTrigger(), detector: 'keyword', keywords: 'tree', incrementPerHit: 0.3, decayPerTurn: 0.05, minLevelToApply: 0.05 };
+    const trigger = { ...defaultTrackerShape(), detector: 'keyword', keywords: 'tree', incrementPerHit: 0.3, decayPerTurn: 0.05, minLevelToApply: 0.05 };
     // Level (0.2 - 0.05 = 0.15) is still >= minLevelToApply, so turnsActive still increments
     // normally — being blocked only suppresses the increment itself, not activity tracking.
     assert.deepEqual(
@@ -621,7 +711,7 @@ test('resolveDetectionLevelUpdate: unmet prerequisite treats a keyword hit as a 
 });
 
 test('resolveLlmRatingUpdate: unmet prerequisite treats a cumulative hit as a no-hit (still decays)', () => {
-    const trigger = { ...defaultTrigger(), llmIntegrationMode: 'cumulative', llmHitThreshold: 5, incrementPerHit: 0.3, decayPerTurn: 0.05 };
+    const trigger = { ...defaultTrackerShape(), llmIntegrationMode: 'cumulative', llmHitThreshold: 5, incrementPerHit: 0.3, decayPerTurn: 0.05 };
     assert.deepEqual(
         resolveLlmRatingUpdate(0.2, false, 7, trigger, false),
         { level: 0.2 - 0.05, locked: false },
@@ -629,7 +719,7 @@ test('resolveLlmRatingUpdate: unmet prerequisite treats a cumulative hit as a no
 });
 
 test('resolveLlmRatingUpdate: unmet prerequisite freezes absolute mode instead of applying the rating', () => {
-    const trigger = { ...defaultTrigger(), llmIntegrationMode: 'absolute' };
+    const trigger = { ...defaultTrackerShape(), llmIntegrationMode: 'absolute' };
     assert.deepEqual(
         resolveLlmRatingUpdate(0.4, false, 9, trigger, false),
         { level: 0.4, locked: false },
@@ -707,63 +797,63 @@ test('meetsDirectionalThreshold: decrease direction mirrors the threshold across
 });
 
 test('resolveHitLevel: increment direction increase nudges up on a hit, decays down otherwise', () => {
-    const trigger = { ...defaultTrigger(), incrementPerHit: 0.3, decayPerTurn: 0.05 };
+    const trigger = { ...defaultTrackerShape(), incrementPerHit: 0.3, decayPerTurn: 0.05 };
     assert.equal(resolveHitLevel(0.2, true, trigger), 0.5);
     assert.equal(resolveHitLevel(0.2, false, trigger), 0.2 - 0.05);
 });
 
 test('resolveHitLevel: increment direction decrease nudges down on a hit, drifts up otherwise', () => {
-    const trigger = { ...defaultTrigger(), hitDirection: 'decrease', restingLevel: 'high', incrementPerHit: 0.3, decayPerTurn: 0.05 };
+    const trigger = { ...defaultTrackerShape(), hitDirection: 'decrease', restingLevel: 'high', incrementPerHit: 0.3, decayPerTurn: 0.05 };
     assert.equal(resolveHitLevel(0.8, true, trigger), 0.5);
     assert.equal(resolveHitLevel(0.8, false, trigger), 0.8 + 0.05);
 });
 
 test('resolveHitLevel: jump behavior goes straight to the hitDirection extreme on a hit', () => {
-    const increasing = { ...defaultTrigger(), hitBehavior: 'jump' };
+    const increasing = { ...defaultTrackerShape(), hitBehavior: 'jump' };
     assert.equal(resolveHitLevel(0.2, true, increasing), 1);
-    const decreasing = { ...defaultTrigger(), hitDirection: 'decrease', hitBehavior: 'jump' };
+    const decreasing = { ...defaultTrackerShape(), hitDirection: 'decrease', hitBehavior: 'jump' };
     assert.equal(resolveHitLevel(0.8, true, decreasing), 0);
 });
 
 test('resolveHitLevel: a magnitudeScale below 1 proportionally shrinks increment and decay', () => {
-    const trigger = { ...defaultTrigger(), incrementPerHit: 0.3, decayPerTurn: 0.1 };
+    const trigger = { ...defaultTrackerShape(), incrementPerHit: 0.3, decayPerTurn: 0.1 };
     assert.equal(resolveHitLevel(0.2, true, trigger, 0.5), 0.2 + 0.15);
     assert.equal(resolveHitLevel(0.2, false, trigger, 0.5), 0.2 - 0.05);
 });
 
 test('resolveLlmMagnitudeScale: disabled (default) always returns 1', () => {
-    const trigger = { ...defaultTrigger(), llmHitThreshold: 5 };
+    const trigger = { ...defaultTrackerShape(), llmHitThreshold: 5 };
     assert.equal(resolveLlmMagnitudeScale(9, true, trigger), 1);
     assert.equal(resolveLlmMagnitudeScale(1, false, trigger), 1);
 });
 
 test('resolveLlmMagnitudeScale: hit scales by distance above threshold toward 10', () => {
-    const trigger = { ...defaultTrigger(), llmMagnitudeScaling: true, llmHitThreshold: 5 };
+    const trigger = { ...defaultTrackerShape(), llmMagnitudeScaling: true, llmHitThreshold: 5 };
     assert.equal(resolveLlmMagnitudeScale(7.5, true, trigger), 0.5); // (7.5-5)/(10-5)
     assert.equal(resolveLlmMagnitudeScale(5, true, trigger), 0); // right at threshold, no scale
     assert.equal(resolveLlmMagnitudeScale(10, true, trigger), 1);
 });
 
 test('resolveLlmMagnitudeScale: no-hit scales by distance below threshold toward 0', () => {
-    const trigger = { ...defaultTrigger(), llmMagnitudeScaling: true, llmHitThreshold: 5 };
+    const trigger = { ...defaultTrackerShape(), llmMagnitudeScaling: true, llmHitThreshold: 5 };
     assert.equal(resolveLlmMagnitudeScale(2.5, false, trigger), 0.5); // (5-2.5)/5
     assert.equal(resolveLlmMagnitudeScale(0, false, trigger), 1);
 });
 
 test('resolveLlmMagnitudeScale: threshold-10 and threshold-0 edge guards return 1 rather than dividing by zero', () => {
-    const highThreshold = { ...defaultTrigger(), llmMagnitudeScaling: true, llmHitThreshold: 10 };
+    const highThreshold = { ...defaultTrackerShape(), llmMagnitudeScaling: true, llmHitThreshold: 10 };
     assert.equal(resolveLlmMagnitudeScale(10, true, highThreshold), 1);
-    const lowThreshold = { ...defaultTrigger(), llmMagnitudeScaling: true, llmHitThreshold: 0 };
+    const lowThreshold = { ...defaultTrackerShape(), llmMagnitudeScaling: true, llmHitThreshold: 0 };
     assert.equal(resolveLlmMagnitudeScale(0, false, lowThreshold), 1);
 });
 
 test('resolveLlmMagnitudeScale: blocked prerequisite always returns 1 regardless of rating', () => {
-    const trigger = { ...defaultTrigger(), llmMagnitudeScaling: true, llmHitThreshold: 5 };
+    const trigger = { ...defaultTrackerShape(), llmMagnitudeScaling: true, llmHitThreshold: 5 };
     assert.equal(resolveLlmMagnitudeScale(9, true, trigger, false), 1);
 });
 
 test('resolveLlmRatingUpdate: magnitude scaling makes a near-threshold rating increment less than a near-max one', () => {
-    const trigger = { ...defaultTrigger(), llmIntegrationMode: 'cumulative', llmMagnitudeScaling: true, llmHitThreshold: 5, incrementPerHit: 0.4 };
+    const trigger = { ...defaultTrackerShape(), llmIntegrationMode: 'cumulative', llmMagnitudeScaling: true, llmHitThreshold: 5, incrementPerHit: 0.4 };
     const nearThreshold = resolveLlmRatingUpdate(0.2, false, 5.5, trigger);
     const nearMax = resolveLlmRatingUpdate(0.2, false, 10, trigger);
     assert.ok(nearThreshold.level - 0.2 < nearMax.level - 0.2);
@@ -771,12 +861,12 @@ test('resolveLlmRatingUpdate: magnitude scaling makes a near-threshold rating in
 });
 
 test('resolveLlmRatingUpdate: magnitude scaling still decays at the flat rate when blocked by a dependency', () => {
-    const trigger = { ...defaultTrigger(), llmIntegrationMode: 'cumulative', llmMagnitudeScaling: true, llmHitThreshold: 5, decayPerTurn: 0.1 };
+    const trigger = { ...defaultTrackerShape(), llmIntegrationMode: 'cumulative', llmMagnitudeScaling: true, llmHitThreshold: 5, decayPerTurn: 0.1 };
     assert.deepEqual(resolveLlmRatingUpdate(0.5, false, 9, trigger, false), { level: 0.5 - 0.1, locked: false });
 });
 
 test('resolveDetectionLevelUpdate: restingLevel high dispels/no-hit-decays toward 1 instead of 0', () => {
-    const trigger = { ...defaultTrigger(), dispelKeywords: 'stop', restingLevel: 'high', detector: 'keyword', keywords: 'never-matches', decayPerTurn: 0.05, minLevelToApply: 0.5, hitDirection: 'decrease' };
+    const trigger = { ...defaultTrackerShape(), dispelKeywords: 'stop', restingLevel: 'high', detector: 'keyword', keywords: 'never-matches', decayPerTurn: 0.05, minLevelToApply: 0.5, hitDirection: 'decrease' };
     assert.deepEqual(
         resolveDetectionLevelUpdate(0.5, 3, 'please stop now', trigger),
         { level: 1, turnsActive: 0, dispelled: true, autoDispelled: false },
@@ -788,7 +878,7 @@ test('resolveDetectionLevelUpdate: restingLevel high dispels/no-hit-decays towar
 });
 
 test('resolveLlmRatingUpdate: restingLevel high + decrease direction erodes on a hit, locks via mirrored lockThreshold', () => {
-    const trigger = { ...defaultTrigger(), llmIntegrationMode: 'cumulative-lock', restingLevel: 'high', hitDirection: 'decrease', llmHitThreshold: 5, incrementPerHit: 0.3, lockThreshold: 0.8 };
+    const trigger = { ...defaultTrackerShape(), llmIntegrationMode: 'cumulative-lock', restingLevel: 'high', hitDirection: 'decrease', llmHitThreshold: 5, incrementPerHit: 0.3, lockThreshold: 0.8 };
     assert.deepEqual(resolveLlmRatingUpdate(0.9, false, 7, trigger), { level: 0.9 - 0.3, locked: false });
     assert.deepEqual(resolveLlmRatingUpdate(0.3, false, 7, trigger), { level: 0, locked: true });
 });

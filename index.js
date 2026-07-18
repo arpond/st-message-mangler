@@ -16,7 +16,7 @@ import { getSettings } from './lib/settings.js';
 import { resetLevelsOnFreshFork } from './lib/chatState.js';
 import { onMessageSent, onCharacterMessageRendered, clearAllAwarenessCues } from './pipeline.js';
 import { addWandStatusButton, addWandPauseButton } from './statusPanel.js';
-import { addSettingsUI, registerSlashCommands, refreshEffectList, refreshDetectionProfileDropdown } from './settingsUI.js';
+import { addSettingsUI, registerSlashCommands, refreshEffectList, refreshTrackerList, refreshDetectionProfileDropdown } from './settingsUI.js';
 
 getSettings();
 addSettingsUI();
@@ -33,6 +33,7 @@ context.eventSource.on(context.eventTypes.CHAT_CHANGED, () => {
     // floating status panel, refreshed as part of the same call) were otherwise left showing
     // whatever chat they were last rendered for until some unrelated action (e.g. expanding a
     // row) happened to force a re-render.
+    refreshTrackerList(settings);
     refreshEffectList(settings);
 });
 context.eventSource.on(context.eventTypes.CONNECTION_PROFILE_LOADED, () => refreshDetectionProfileDropdown(getSettings()));

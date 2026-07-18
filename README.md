@@ -1,19 +1,23 @@
 # Message Mangler
 
 SillyTavern extension that rewrites chat messages — through a configurable pipeline of
-**effects** — before they're shown in the chat log and before they're sent to the LLM. Each
-effect has a **Target** (user messages, AI messages, or both) — by default effects only touch
-your own messages, but can be set to also or instead rewrite the character's replies. Both the
-displayed bubble and the model's actual context reflect the final mangled text; optionally you
-can also show the original alongside it (display-only — the model never sees the original).
+**effects** — before they're shown in the chat log and before they're sent to the LLM. Detection
+and behavior are two separate, linked things: a **tracker** owns the detection logic (keyword or
+LLM evidence → a per-chat 0–1 level → escalation/decay), and an **effect** owns the behavior (a
+transform and/or an awareness cue) that reacts to one tracker's level. Each effect has a
+**Target** (user messages, AI messages, or both) — by default effects only touch your own
+messages, but can be set to also or instead rewrite the character's replies. Both the displayed
+bubble and the model's actual context reflect the final mangled text; optionally you can also show
+the original alongside it (display-only — the model never sees the original).
 
 New to this extension? **[`SETUP_GUIDE.md`](SETUP_GUIDE.md)** is a hands-on, step-by-step
 walkthrough building three complete effects from scratch (simple → intermediate → advanced) —
 this README is the reference; that guide is the tutorial.
 
-**Contents:** [Install](#install) · [Usage](#usage) · [Configuring an effect](#configuring-an-effect)
-· [Day-to-day tools](#day-to-day-tools) · [Example effects](#example-effects) · [FAQ](#faq) ·
-[Troubleshooting](#troubleshooting) · [How it works](#how-it-works)
+**Contents:** [Install](#install) · [Usage](#usage) · [Configuring a tracker](#trackers) ·
+[Configuring an effect](#configuring-an-effect) · [Day-to-day tools](#day-to-day-tools) ·
+[Example effects](#example-effects) · [FAQ](#faq) · [Troubleshooting](#troubleshooting) ·
+[How it works](#how-it-works)
 
 ## Install
 
@@ -66,28 +70,37 @@ Open the **Message Mangler** drawer in the Extensions settings panel.
   one profile configured; if none are available, this shows a note instead of a dropdown.
   SillyTavern's own macros (`{{user}}`, `{{char}}`, etc.) work in **Condition to detect** either
   way, whether or not a detection connection profile is set.
+- **Trackers** — an ordered list, each collapsing to one line (enabled checkbox, label,
+  mode/detector summary, reorder/duplicate/delete) — click the chevron to expand it. Click **Add
+  tracker** to add one, pick **Always** or **Progressive** on its Trigger tab, and configure a
+  detector (see [Trackers](#trackers) below) if progressive. A tracker owns detection/level state
+  only — no transform, no target, no prompt text. Every effect below is gated by one, chosen on
+  the effect's Basics tab.
 - **Effects** — an ordered list, each independently configurable. Each effect collapses to one
   line (enabled checkbox, label, type, reorder/duplicate/delete) — click the chevron to expand
   it. The enabled checkbox and label are both right there in that collapsed header, editable
   whether the row is expanded or not, so toggling an effect off or renaming it never requires
   opening it. New effects open expanded by default. Click **Add effect** to add
-  one, pick a **type**, set its **Target** (User messages / AI messages / Both — which speaker's
-  message the transform actually rewrites; independent of the trigger's detection source below),
-  and configure its **trigger**. Use the ▲/▼ buttons to reorder, or the copy icon to **duplicate**
-  an effect (inserted right after the original, with a fresh id — a quick way to start a similar
-  effect from an existing one instead of reconfiguring from scratch) — order
-  matters, since each effect runs on the previous one's output. **Export effects** downloads the
-  current list as JSON; **Import effects** reads a JSON file back in, appending its effects as
-  new entries (each gets a fresh id, so importing never overwrites or collides with what you
-  already have — reorder/delete afterward as needed). Every effect also has a **Test** panel:
-  type sample text, adjust the **Test at level** slider (drunk/llm-rewrite only — regex ignores
-  level entirely), click **Run test**, and see that one effect's output in isolation without
-  sending a real chat message — useful for tuning a regex pattern, checking a drunk effect's
-  intensity curve at different levels, or an LLM-rewrite prompt before wiring it to a live
-  trigger. Progressive effects also get a **Test detection** button, checking `trigger.keywords`/
-  `trigger.llmCondition` against the same sample text — keyword mode reports the match instantly;
-  LLM mode fires a real classification call and shows the raw rating. Neither ever touches the
-  effect's actual level/turns/locked state for the current chat.
+  one — this also auto-creates and pairs a fresh tracker, so the single-effect experience needs no
+  extra setup; pick a different existing tracker on the Basics tab if you want to share one, or use
+  **Add tracker** above to build a shared one first. Pick a **type**, and set its **Target** (User
+  messages / AI messages / Both — which speaker's message the transform actually rewrites;
+  independent of its tracker's detection source). Use the ▲/▼ buttons to reorder, or the copy icon
+  to **duplicate** an effect (inserted right after the original, with a fresh id, same tracker
+  reference — a quick way to start a similar effect from an existing one instead of reconfiguring
+  from scratch) — order matters, since each effect runs on the previous one's output. **Export
+  effects** downloads the current tracker + effect lists as JSON; **Import effects** reads a JSON
+  file back in, appending its trackers and effects as new entries (each gets a fresh id, so
+  importing never overwrites or collides with what you already have — reorder/delete afterward as
+  needed; a file exported by an older version of this extension is still importable, migrated on
+  the way in). Every effect also has a **Test** panel: type sample text, adjust the **Test at
+  level** slider (drunk/llm-rewrite only — regex ignores level entirely), click **Run test**, and
+  see that one effect's output in isolation without sending a real chat message — useful for tuning
+  a regex pattern, checking a drunk effect's intensity curve at different levels, or an LLM-rewrite
+  prompt before wiring it to a live tracker. A progressive tracker gets its own **Test detection**
+  button on its Test tab, checking its keywords/condition against a sample text — keyword mode
+  reports the match instantly; LLM mode fires a real classification call and shows the raw rating.
+  Neither ever touches the tracker's actual level/turns/locked state for the current chat.
 
 ## Configuring an effect
 
@@ -172,9 +185,9 @@ Rewritten message (text only, no commentary):
 ```
 
 **Latency note:** an LLM rewrite effect adds one real generation round-trip to every message
-send where it's active — unlike LLM-based *triggers* (below), which run in the background and
-never block sending. Use `minLevelToApply` and a `keyword` trigger to keep it dormant (and free)
-until actually relevant.
+send where it's active — unlike LLM-based *trackers* (below), which run in the background and
+never block sending. Use a `keyword` detector and a sensible `minLevelToApply` on its tracker to
+keep it dormant (and free) until actually relevant.
 
 **Reasoning-model output:** the extension appends an instruction telling the model to reply with
 only the rewritten message (no chain-of-thought/preamble), and also strips it programmatically —
@@ -203,10 +216,13 @@ rewrite/classification prompt. This is a mitigation, not a guarantee — no deli
 bulletproof against a sufficiently motivated prompt, so don't treat rewrite effects as a hard
 security boundary.
 
-### Triggers
+### Trackers
 
-- **Always** — the effect runs on every message while enabled.
-- **Progressive** — the effect's strength is driven by a per-chat 0–1 "level" that moves based on
+Each tracker (its own list, separate from Effects — see [Usage](#usage) above) has a Trigger tab
+with:
+
+- **Always** — the tracker's level is a constant `1` on every message while it's enabled.
+- **Progressive** — the level is driven by a per-chat 0–1 value that moves based on
   detected activity in the user's and/or the AI character's recent messages (see **Detect from**
   below), and drifts back toward its resting level on quiet turns. Three fields shape this:
   - **Resting level** — **Low (0)** (default) or **High (1)**: what the level starts at and what
@@ -214,7 +230,7 @@ security boundary.
   - **Hit direction** — **Increase** (default) or **Decrease**: which way a hit moves the level.
     "Decrease" also mirrors **Min level to apply**/**Lock threshold** below (same 0–1 meaning,
     "how far toward the hit direction's extreme") so they still mean the same thing either way —
-    e.g. a "trust" effect with resting **High** and direction **Decrease** starts fully trusting
+    e.g. a "trust" tracker with resting **High** and direction **Decrease** starts fully trusting
     and erodes on a betrayal keyword, recovering on quiet turns.
   - **Hit behavior** — **Gradual** (default, nudges by **Increment per hit**) or **Jump** (any hit
     sends the level straight to the extreme in **Hit direction**, e.g. a "fresh wound" that's
@@ -235,7 +251,7 @@ security boundary.
     keyword-match detection and is hidden while LLM classification is selected.)
 
     The classifier prompt is deliberately free-form, not JSON-schema-constrained: the model is
-    told it may reason first, then must end its response with one `<effect-id>: <rating>` line
+    told it may reason first, then must end its response with one `<tracker-id>: <rating>` line
     per condition, which is extracted by regex afterward. Forcing structured JSON output from
     the first token gives a reasoning-dependent model no room to think — this was observed to
     reliably return an empty response on a local reasoning model even for an obvious match, so
@@ -267,80 +283,82 @@ security boundary.
       **Lock threshold** it locks: further ratings are ignored entirely (no increment, no decay)
       until a **Dispel keyword** clears it. Use this for a condition that, once clearly true,
       should stay true rather than fade if the model's later ratings dip. The live "Locked"
-      readout shows whether an effect is currently locked for the active chat.
+      readout shows whether a tracker is currently locked for the active chat.
   - **Detect from** — restricts which speaker's messages are allowed to update the level:
     **Both** (default, matches earlier versions), **User messages only**, or **AI/character
     messages only**. Applies identically to either detector. Note this only gates *detection* —
-    a `character`-only effect can still apply its transform to your messages once the AI's
-    dialogue has raised its level; it just never lets your own messages move that level (and
-    vice versa for `user`-only).
-  - **Min level to apply** — below this, the effect is skipped entirely (dormant), avoiding
-    wasted regex/drunk/LLM work when nothing's triggered it yet.
+    an effect using a `character`-only tracker can still apply its transform to your messages once
+    the AI's dialogue has raised the level; it just never lets your own messages move that level
+    (and vice versa for `user`-only).
+  - **Min level to apply** — below this, any effect using this tracker stays dormant (skipped
+    entirely, no wasted regex/drunk/LLM work) and the tracker's own turns-active count stays at 0.
   - **Dispel keywords** — a separate comma-separated word list, checked every turn regardless of
     detector mode. A match forces the level straight back to its resting level immediately — an
     explicit "the spell is broken" override, independent of normal drift.
-  - **Max turns active** (0 = disabled) — auto-dispels (back to resting level) an effect that's
+  - **Max turns active** (0 = disabled) — auto-dispels (back to resting level) a tracker that's
     stayed active for this many consecutive turns, so it doesn't just plateau forever.
   - The current level, turns-active count, and locked state for the active chat are shown live
-    next to each progressive effect, alongside a **Dispel now** button that immediately resets
+    next to each progressive tracker, alongside a **Dispel now** button that immediately resets
     level, turns-active, and locked state back to their resting level for the active chat — the
     manual equivalent of a dispel-keyword match, useful for testing without crafting a matching
     message.
   - A **Set level** field + button next to Dispel now lets you jump straight to an arbitrary
     level instead of always 0 — e.g. to set up a specific scene state without waiting for real
     detection. Also resets turns-active and locked (same as Dispel now), and never auto-locks a
-    `cumulative-lock` effect even if the chosen level clears the lock threshold — only a real
-    rating locks an effect. The floating status panel has the same control per effect row, for
-    setting a level without opening the settings panel mid-scene.
+    `cumulative-lock` tracker even if the chosen level clears the lock threshold — only a real
+    rating locks it. The floating status panel has the same control per effect row (acting on that
+    effect's tracker), for setting a level without opening the settings panel mid-scene.
 
 ### Per-chat activation and character binding
 
-Effects are defined globally (one config, usable in any chat), but whether an effect actually
+Trackers are defined globally (one config, usable in any chat), but whether a tracker actually
 *runs* in a given chat, and which character it's bound to there, are configured **per chat** from
-the floating status panel (wand menu → **Mangler status**) — not from the effect editor. This
-means the same globally-defined effect can be active-and-bound-to-Alice in one chat, off entirely
+the floating status panel (wand menu → **Mangler status**) — not from the tracker editor. This
+means the same globally-defined tracker can be active-and-bound-to-Alice in one chat, off entirely
 in another, and bound to a different character in a third, without re-configuring anything global
-each time you switch chats.
+each time you switch chats. Any effect using that tracker inherits its active/bound state — the
+effect itself has no activation or binding of its own.
 
-- **Chat activation** — the effect editor's Basics tab has a **Chat activation** field: "Active by
+- **Chat activation** — the tracker editor's Basics tab has a **Chat activation** field: "Active by
   default (every chat)" (today's behavior — runs everywhere unless turned off for a specific chat)
   or "Inactive by default (turn on per chat)" (off everywhere until explicitly enabled for a
-  chat). Either way, the status panel shows a checkbox per enabled effect reflecting its *actual*
-  state in the current chat (default or override), with a small reset icon to clear a per-chat
-  override back to the effect's global default.
-- **Character binding** — the status panel also shows a picker per effect, scoped to who can
-  actually speak in the current chat (a group's members in a group chat, just the one active
-  character otherwise) rather than your whole install's roster. When set, that effect's detection
-  and transform only ever consider that specific character's messages, independent of the
-  **Detect from**/**Target** settings — e.g. a "jealousy" effect can be scoped to react to (and
-  only mangle) one particular character in a group rather than the whole cast. Unbound (the
-  default) matches every character. User messages are never gated by this — there's only one
-  "you" in a chat, so binding has nothing to restrict there. If the bound character is later
-  deleted, the binding fails open (treated as unbound) rather than permanently blocking the
-  effect.
+  chat). Either way, the status panel shows a checkbox per enabled effect reflecting its tracker's
+  *actual* state in the current chat (default or override), with a small reset icon to clear a
+  per-chat override back to the tracker's global default.
+- **Character binding** — the status panel also shows a picker per effect (acting on that effect's
+  tracker), scoped to who can actually speak in the current chat (a group's members in a group
+  chat, just the one active character otherwise) rather than your whole install's roster. When
+  set, that tracker's detection — and, through it, every effect using it — only ever considers
+  that specific character's messages, independent of the **Detect from**/**Target** settings —
+  e.g. a "jealousy" tracker can be scoped to react to (and only drive effects mangling) one
+  particular character in a group rather than the whole cast. Unbound (the default) matches every
+  character. User messages are never gated by this — there's only one "you" in a chat, so binding
+  has nothing to restrict there. If the bound character is later deleted, the binding fails open
+  (treated as unbound) rather than permanently blocking the
+  tracker (and everything using it).
 
 Both settings are chat-scoped state (same storage mechanism as level/turns/locked), so they
-persist per chat and travel with that chat's data, not with the effect's global config.
+persist per chat and travel with that chat's data, not with the tracker's global config.
 
-### Effect dependencies
+### Tracker dependencies
 
-The **Dependency** tab (separate from Trigger) lists zero or more dependencies (empty by
-default) — each blocks this effect's level from *increasing* until the referenced effect's level
-reaches that row's **Min level**. With more than one dependency, *every* row must be satisfied
-(AND-gate) before escalation resumes. Decay/dispel still work normally while blocked — only
-escalation is paused ("Swings freely" mode has no separate decay step, so it just holds its
-current level instead). Useful for chaining effects: e.g. a "confession" effect that needs both
+Each tracker's **Dependency** tab (separate from Trigger) lists zero or more dependencies (empty
+by default) — each blocks this tracker's level from *increasing* until the referenced tracker's
+level reaches that row's **Min level**. With more than one dependency, *every* row must be
+satisfied (AND-gate) before escalation resumes. Decay/dispel still work normally while blocked —
+only escalation is paused ("Swings freely" mode has no separate decay step, so it just holds its
+current level instead). Useful for chaining trackers: e.g. a "confession" tracker that needs both
 "trust" and "tension" to clear their own thresholds before it can even start escalating. Only
-applies to progressive effects — the tab shows a note instead of the fields for `always`-mode
-effects, which have nothing to gate. Each row's picker excludes any effect that would create a
-dependency cycle (checked across the whole graph, not just that one row) and any effect already
-picked in one of this effect's *other* rows, so neither can be formed by accident. If a referenced
-effect is later deleted, that one dependency is treated as if it weren't set (fails open — drops
-out of the AND-gate rather than permanently blocking the effect) — a caution icon on the collapsed
+applies to progressive trackers — the tab shows a note instead of the fields for `always`-mode
+trackers, which have nothing to gate. Each row's picker excludes any tracker that would create a
+dependency cycle (checked across the whole graph, not just that one row) and any tracker already
+picked in one of this tracker's *other* rows, so neither can be formed by accident. If a referenced
+tracker is later deleted, that one dependency is treated as if it weren't set (fails open — drops
+out of the AND-gate rather than permanently blocking the tracker) — a caution icon on the collapsed
 row and a status line in the Dependency tab explain why, whether it's a broken reference or just a
 currently-unmet prerequisite (one line per issue, when there's more than one). Duplicating or
-importing an effect never carries its dependencies over — a copy always starts with none, so it
-can't accidentally point at the wrong effect.
+importing a tracker never carries its dependencies over — a copy always starts with none, so it
+can't accidentally point at the wrong tracker.
 
 ### Worked examples: resting level, hit direction, and dependencies together
 
@@ -354,21 +372,21 @@ concrete scenarios:
 - **"Eroding trust"** — starts high, collapses under pressure, recovers if left alone. Resting
   level **High**, Hit direction **Decrease**, Hit behavior **Gradual**, keywords
   `lied, betrayed, broke his promise`. The level starts at `1.00` and *drops* by **Increment per
-  hit** on a match instead of rising. **Min level to apply** is mirrored for a Decrease effect —
-  set it to `0.8` and the effect activates once trust has fallen to `0.2` or below (80% of the way
-  toward full collapse), not once it's risen to `0.8`.
-- **"Confession gated by trust and tension"** — two progressive effects, `Trust` and `Tension`,
-  each escalating independently from their own keywords/LLM condition. A third effect,
+  hit** on a match instead of rising. **Min level to apply** is mirrored for a Decrease tracker —
+  set it to `0.8` and any effect using this tracker activates once trust has fallen to `0.2` or
+  below (80% of the way toward full collapse), not once it's risen to `0.8`.
+- **"Confession gated by trust and tension"** — two progressive trackers, `Trust` and `Tension`,
+  each escalating independently from their own keywords/LLM condition. A third tracker,
   `Confession`, has *two* Dependency-tab rows: `Trust` at Min level `0.6` and `Tension` at Min
   level `0.6`. `Confession`'s own level can't rise until **both** are satisfied — either one
   alone leaves it blocked, and the status line names whichever is still short.
-- **"Rating magnitude scaling"** — an LLM-classified effect in Cumulative mode, Hit threshold
+- **"Rating magnitude scaling"** — an LLM-classified tracker in Cumulative mode, Hit threshold
   `5`, **Scale by rating magnitude** on. A rating of `5.5` (just past threshold) applies only a
   small fraction of **Increment per hit**; a rating of `10` applies the full amount. Without this
   toggle, `5.5` and `10` would move the level identically.
 
-Multiple progressive effects using `llm` detection are batched into a **single** classification
-call per message (one prompt rating every due effect at once) rather than one call each — see
+Multiple progressive trackers using `llm` detection are batched into a **single** classification
+call per message (one prompt rating every due tracker at once) rather than one call each — see
 "Max LLM calls per message" above for the overall cap.
 
 Effects run in list order. An invalid regex pattern, a pattern that looks like it risks
@@ -385,20 +403,21 @@ success — only a genuinely persistent failure reaches the fail-open path.
 
 Click **Status panel** (next to Collapse all in the extension's settings), or **Mangler status**
 in the wand/extensions menu next to the chat input, to open a small draggable overlay listing
-every enabled progressive effect with its live level and lock state — the same 🔒/●/○ + level
-badge the collapsed effect rows show, updating in real time as messages are processed, without
-needing the Extensions drawer open mid-scene. The wand-menu entry is the easier way to reach it
-on mobile, where scrolling to the settings-panel button is awkward. Drag it anywhere (position
-persists across reloads via SillyTavern's Moving UI); close it with the ✕ or either toolbar
-button. The panel starts closed on each page load. Effects with an `always` trigger aren't
-listed — they're trivially active at level 1, so there's nothing to watch.
+every enabled effect with its per-chat active/bound state, plus (for effects whose tracker is
+progressive) the same 🔒/●/○ + level badge the collapsed Tracker rows show, updating in real time
+as messages are processed — without needing the Extensions drawer open mid-scene. An effect using
+an `always`-mode tracker is still listed (activation/binding still apply to it) but shows no
+level/lock badge, since its level is a trivial constant `1`. The wand-menu entry is the easier way
+to reach the panel on mobile, where scrolling to the settings-panel button is awkward. Drag it
+anywhere (position persists across reloads via SillyTavern's Moving UI); close it with the ✕ or
+either toolbar button. The panel starts closed on each page load.
 
 ### Pausing transforms for one message
 
 Click **Pause next message** in the wand/extensions menu, or run `/mangler-pause`, to skip every
 effect's transform for the next message only (user or character, whichever comes first) — the
 message goes through completely unmangled. Detection, levels, and awareness cues are unaffected;
-this only suppresses the transform, so a progressive effect keeps escalating/decaying normally
+this only suppresses the transform, so a progressive tracker keeps escalating/decaying normally
 even while paused. It auto-clears after that one message — run `/mangler-pause state=off` to
 cancel a pending pause without waiting for it to consume itself.
 
@@ -411,8 +430,8 @@ cancel a pending pause without waiting for it to consume itself.
 ### Debug logging
 
 There's a `debug` setting with no UI control — enable it from the browser console when you need
-to trace exactly what the pipeline is doing for a message (current level per effect, whether the
-trigger threshold was reached, whether a rewrite actually happened, detector batching, etc.),
+to trace exactly what the pipeline is doing for a message (current level per tracker, whether the
+threshold was reached, whether a rewrite actually happened, detector batching, etc.),
 including the full text of every prompt actually sent to your connected model (llm-rewrite,
 batched LLM detection, and the Test panel's detection check):
 
@@ -454,10 +473,15 @@ the lorebook is what keeps the "why" from feeling arbitrary.
 
 A few concept pairs that sound similar but mean different things, collected in one place:
 
-- **Target vs. "Detect from" (`detectSource`)** — **Target** is *which speaker's message gets
-  rewritten*. **Detect from** is *whose messages are allowed to move the level*. They're
-  independent: an effect can detect from one speaker (say, the AI's dialogue) and only ever
-  transform the other speaker's text.
+- **Target vs. "Detect from" (`detectSource`)** — **Target** (on the Effect) is *which speaker's
+  message gets rewritten*. **Detect from** (on its Tracker) is *whose messages are allowed to
+  move the level*. They're independent: an effect's tracker can detect from one speaker (say, the
+  AI's dialogue) while the effect itself only ever transforms the other speaker's text.
+- **Tracker vs. Effect** — a **Tracker** is pure detection/level state (keyword or LLM evidence →
+  a per-chat 0–1 level → escalation/decay), no transform or prompt text of its own. An **Effect**
+  is pure behavior (a transform and/or an awareness cue) gated by one Tracker, chosen on the
+  effect's Basics tab. Today it's always one Tracker per Effect, but several Effects can point at
+  the same Tracker to react to one shared signal.
 - **`{{level}}` vs. `{{level_pct}}`** — the same value in two units: 0-1 vs. 0-100. Use whichever
   reads more naturally in your prompt. If your model seems to treat one form oddly (e.g. the
   literal maximum reading as "weak" — see the known-quirk note above), try the other.
@@ -496,11 +520,11 @@ seeing one of these, this is likely why.
   local single-worker backends). The extension already serializes these two calls when both are
   active on the same message — if you're still seeing this, it may be a different concurrency
   path; enable [Debug logging](#debug-logging) and check the console.
-- **LLM classification (progressive triggers) never detects anything, or always returns
+- **LLM classification (progressive trackers) never detects anything, or always returns
   nothing.** If your connected model does explicit reasoning before answering, a
   JSON-schema-constrained response format can starve it of room to think and come back empty.
   Detection here is deliberately free-form (the model may reason, then must end with one
-  `<effect-id>: <rating>` line per condition, extracted by regex) rather than schema-constrained,
+  `<tracker-id>: <rating>` line per condition, extracted by regex) rather than schema-constrained,
   specifically to avoid this. If ratings still aren't coming through, check the condition
   description in **Condition to detect** — a vague label gives the classifier little to work
   with.
@@ -520,19 +544,19 @@ seeing one of these, this is likely why.
   manual in-place edit that happens to preserve the existing mangled prefix looks the same as a
   Continue to this check — worst case it only reprocesses the edited part instead of the whole
   message.
-- **A keyword-based progressive trigger kept climbing faster than expected across a Continue.**
+- **A keyword-based progressive tracker kept climbing faster than expected across a Continue.**
   Fixed — keyword (and dispel-keyword) matching now only scans the newly generated portion of a
   continued message, instead of re-scanning the already-mangled earlier text and re-counting a
   keyword hit that already applied on an earlier turn.
-- **An LLM-classification progressive trigger (`cumulative`/`cumulative-lock`) also jumped extra
+- **An LLM-classification progressive tracker (`cumulative`/`cumulative-lock`) also jumped extra
   on a Continue.** Fixed — Continue re-fires the same rendering hook for what's really one
   interrupted turn, not a new one; the extension now skips re-firing the LLM detector batch for a
   continuation, so the scene only gets rated once per actual turn.
-- **Forking/branching a chat from an earlier message brought an effect's level along with it —
+- **Forking/branching a chat from an earlier message brought a tracker's level along with it —
   sometimes already locked or escalated despite the forked history never showing why.**
   Fixed — SillyTavern's fork feature copies the *source* chat's current metadata, not a
   snapshot from the message you forked from (there's no per-message level history to copy from).
-  Every effect's level/turns-active/locked state now resets once, automatically, the first time
+  Every tracker's level/turns-active/locked state now resets once, automatically, the first time
   a freshly forked chat is opened.
 
 ## How it works
@@ -543,22 +567,25 @@ and rewrites `message.mes` in place (what's stored and sent to the model), and �
 original" is enabled — sets `message.extra.display_text` (a render-only override SillyTavern
 already supports) so the chat bubble can show extra context without it ever reaching the prompt.
 
-Also hooks `CHARACTER_MESSAGE_RENDERED` — this always updates progressive trigger levels from
+Also hooks `CHARACTER_MESSAGE_RENDERED` — this always updates progressive tracker levels from
 the AI's dialogue (same as before), and additionally now runs the transform pipeline for any
 effect whose **Target** includes AI messages. Since that event fires *after* the message is
 already rendered to the DOM (unlike `MESSAGE_SENT`, which fires before render), a text change
 here explicitly re-renders that message block and saves the chat, rather than relying on the
-normal render path. Each effect's per-chat level lives in `chatMetadata`, so it persists with the
+normal render path. Each tracker's per-chat level lives in `chatMetadata`, so it persists with the
 chat file and resets naturally when you switch chats.
 
 The LLM detector's classification prompt is deliberately free-form rather than JSON-schema-
-constrained (see the Triggers section above), and its rating-line parser is permissive on
-purpose — it finds an effect's id anywhere in the model's response and takes the nearest number
-after it, so formats like `**id**: 7`, `id: 7/10`, or `id rated 8 out of 10` all parse correctly,
-not just an exact `id: 7` at the start of a line.
+constrained (see the [Trackers](#trackers) section above), and its rating-line parser is
+permissive on purpose — it finds a tracker's id anywhere in the model's response and takes the
+nearest number after it, so formats like `**id**: 7`, `id: 7/10`, or `id rated 8 out of 10` all
+parse correctly, not just an exact `id: 7` at the start of a line.
 
-Settings from earlier versions (a flat regex rule list + a single hardcoded drunk mode) are
-migrated automatically into equivalent `effects[]` entries the first time this version loads.
+Settings from earlier versions are migrated automatically the first time this version loads: v1/v2's
+flat regex rule list + a single hardcoded drunk mode became `effects[]` entries in v3; a
+pre-decoupling fused `effects[]` (each entry bundling its own detection config) is now split into
+separate `trackers[]` and slimmer `effects[]` — each tracker keeps its fused effect's original id,
+so existing per-chat levels/locks/bindings carry over untouched.
 
 ## License
 

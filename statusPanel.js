@@ -3,8 +3,8 @@ import { dragElement } from '../../../RossAscends-mods.js';
 import { context } from './lib/context.js';
 import { getSettings } from './lib/settings.js';
 import {
-    effectStatusBadgeHtml, getEffectLevel, setEffectLevel, setEffectTurnsActive, setEffectLocked, setTransformPaused,
-    getEffectChatBinding, setEffectChatBinding, getEffectChatActiveOverride, setEffectChatActiveOverride,
+    trackerStatusBadgeHtml, getTrackerLevel, setTrackerLevel, setTrackerTurnsActive, setTrackerLocked, setTransformPaused,
+    getTrackerChatBinding, setTrackerChatBinding, getTrackerChatActiveOverride, setTrackerChatActiveOverride,
 } from './lib/chatState.js';
 import { escapeHtmlForDisplay, resolveChatActiveState } from './lib/pure.js';
 import { bindableCharacters } from './lib/characterUtils.js';
@@ -13,16 +13,18 @@ import { bindableCharacters } from './lib/characterUtils.js';
 // A small draggable overlay (standard ST popout pattern: .draggable div in #movingDivs, position
 // persisted via power_user.movingUIState under the element id) showing every enabled effect's
 // live per-chat state (active/bound-character/level) without opening the Extensions drawer. Rows
-// embed the exact same effectStatusBadgeHtml markup as the collapsed effect rows, so
-// refreshEffectStatusBadge's class+data-effect-id .replaceWith() keeps both locations live with
+// embed the exact same trackerStatusBadgeHtml markup as the collapsed tracker rows, so
+// refreshTrackerStatusBadge's class+data-tracker-id .replaceWith() keeps both locations live with
 // no extra call sites. Open state is session-only (like expandedEffectIds) — the panel starts
 // closed on reload.
 //
-// Lists every enabled effect, not just 'progressive' ones — per-chat activation and character
-// binding matter for 'always'-mode effects too (only the level-set input is progressive-only).
+// Lists every enabled effect, not just those whose tracker is 'progressive' — per-chat activation
+// and character binding matter for 'always'-mode trackers too (only the level-set input is
+// progressive-only). Activation/binding/level are all Tracker-owned state now — an effect's row
+// controls and displays its tracker's state, since that's what it inherits and reacts to.
 
-function bindCharacterOptionsHtml(effect) {
-    const boundAvatar = getEffectChatBinding(effect);
+function bindCharacterOptionsHtml(tracker) {
+    const boundAvatar = getTrackerChatBinding(tracker);
     const options = [...bindableCharacters()]; // copy — bindableCharacters can return context.characters by reference, never mutate it
     // Keep the currently-bound character visible even if it's not in this group (e.g. bound
     // while a different group was active) — a valid-but-filtered-out value shouldn't look like
@@ -46,17 +48,25 @@ function renderStatusPanelRows(settings) {
     const rows = settings.effects
         .filter(e => e.enabled)
         .map(e => {
-            const override = getEffectChatActiveOverride(e);
-            const active = resolveChatActiveState(e.chatActivationMode, override);
-            const levelInput = e.trigger.mode === 'progressive'
-                ? `<input type="number" class="text_pole st_mangler_status_set_level" min="0" max="1" step="0.01" value="${getEffectLevel(e).toFixed(2)}" title="Set level for this chat (also resets turns active/locked)" />`
+            const tracker = settings.trackers.find(t => t.id === e.trackerId);
+            if (!tracker) {
+                return `
+            <div class="st_mangler_status_row" data-effect-id="${e.id}">
+                <span class="st_mangler_status_row_label">${escapeHtmlForDisplay(e.label || e.id)}</span>
+                <i class="fa-solid fa-triangle-exclamation st_mangler_dependency_warning" title="No tracker chosen (or it no longer exists) — nothing to control here."></i>
+            </div>`;
+            }
+            const override = getTrackerChatActiveOverride(tracker);
+            const active = resolveChatActiveState(tracker.chatActivationMode, override);
+            const levelInput = tracker.mode === 'progressive'
+                ? `<input type="number" class="text_pole st_mangler_status_set_level" min="0" max="1" step="0.01" value="${getTrackerLevel(tracker).toFixed(2)}" title="Set level for this chat (also resets turns active/locked)" />`
                 : '';
             return `
-            <div class="st_mangler_status_row" data-effect-id="${e.id}">
+            <div class="st_mangler_status_row" data-effect-id="${e.id}" data-tracker-id="${tracker.id}">
                 <input type="checkbox" class="st_mangler_status_active" ${active ? 'checked' : ''} title="Active in this chat" />
-                ${effectStatusBadgeHtml(e)}<span class="st_mangler_status_row_label">${escapeHtmlForDisplay(e.label || e.id)}</span>
-                ${override !== undefined ? `<i class="fa-solid fa-rotate-left st_mangler_status_reset_active" title="Reset to this effect's default (${e.chatActivationMode === 'auto' ? 'active' : 'inactive'} by default)"></i>` : ''}
-                ${bindCharacterOptionsHtml(e)}
+                ${trackerStatusBadgeHtml(tracker)}<span class="st_mangler_status_row_label">${escapeHtmlForDisplay(e.label || e.id)}</span>
+                ${override !== undefined ? `<i class="fa-solid fa-rotate-left st_mangler_status_reset_active" title="Reset to this tracker's default (${tracker.chatActivationMode === 'auto' ? 'active' : 'inactive'} by default)"></i>` : ''}
+                ${bindCharacterOptionsHtml(tracker)}
                 ${levelInput}
             </div>`;
         })
@@ -91,35 +101,36 @@ function openStatusPanel(settings) {
     $('#st_mangler_status_panel_close').on('click', closeStatusPanel);
     // Delegated on the outer panel (not the body) so all of these survive
     // refreshStatusPanelContents' .html() replacement of just the body — no rebinding needed
-    // after every refresh.
+    // after every refresh. Resolved by data-tracker-id, not data-effect-id — this row's live
+    // controls act on the underlying Tracker, which is what actually owns this state.
     $('#st_mangler_status_panel').on('change', '.st_mangler_status_set_level', function () {
-        const id = $(this).closest('.st_mangler_status_row').data('effect-id');
-        const effect = getSettings().effects.find(e => e.id === id);
-        if (!effect) return;
+        const trackerId = $(this).closest('.st_mangler_status_row').data('tracker-id');
+        const tracker = getSettings().trackers.find(t => t.id === trackerId);
+        if (!tracker) return;
         const level = Number($(this).val());
-        setEffectLevel(effect, level);
-        setEffectTurnsActive(effect, 0);
-        setEffectLocked(effect, false);
+        setTrackerLevel(tracker, level);
+        setTrackerTurnsActive(tracker, 0);
+        setTrackerLocked(tracker, false);
     });
     $('#st_mangler_status_panel').on('change', '.st_mangler_status_active', function () {
-        const id = $(this).closest('.st_mangler_status_row').data('effect-id');
-        const effect = getSettings().effects.find(e => e.id === id);
-        if (!effect) return;
-        setEffectChatActiveOverride(effect, $(this).prop('checked'));
+        const trackerId = $(this).closest('.st_mangler_status_row').data('tracker-id');
+        const tracker = getSettings().trackers.find(t => t.id === trackerId);
+        if (!tracker) return;
+        setTrackerChatActiveOverride(tracker, $(this).prop('checked'));
         refreshStatusPanelContents(getSettings());
     });
     $('#st_mangler_status_panel').on('click', '.st_mangler_status_reset_active', function () {
-        const id = $(this).closest('.st_mangler_status_row').data('effect-id');
-        const effect = getSettings().effects.find(e => e.id === id);
-        if (!effect) return;
-        setEffectChatActiveOverride(effect, undefined);
+        const trackerId = $(this).closest('.st_mangler_status_row').data('tracker-id');
+        const tracker = getSettings().trackers.find(t => t.id === trackerId);
+        if (!tracker) return;
+        setTrackerChatActiveOverride(tracker, undefined);
         refreshStatusPanelContents(getSettings());
     });
     $('#st_mangler_status_panel').on('change', '.st_mangler_status_bind', function () {
-        const id = $(this).closest('.st_mangler_status_row').data('effect-id');
-        const effect = getSettings().effects.find(e => e.id === id);
-        if (!effect) return;
-        setEffectChatBinding(effect, $(this).val());
+        const trackerId = $(this).closest('.st_mangler_status_row').data('tracker-id');
+        const tracker = getSettings().trackers.find(t => t.id === trackerId);
+        if (!tracker) return;
+        setTrackerChatBinding(tracker, $(this).val());
         refreshStatusPanelContents(getSettings());
     });
 }

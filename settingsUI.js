@@ -2,22 +2,33 @@ import { extension_prompt_types } from '../../../../script.js';
 import { context } from './lib/context.js';
 import { log, warn } from './lib/log.js';
 import { getSettings } from './lib/settings.js';
-import { getEffectLevel, getEffectLocked, setEffectLevel, setEffectTurnsActive, setEffectLocked, setTransformPaused } from './lib/chatState.js';
+import {
+    getTrackerLevel, getTrackerLocked, setTrackerLevel, setTrackerTurnsActive, setTrackerLocked, setTransformPaused,
+} from './lib/chatState.js';
 import { runDetectionTest } from './lib/llmClient.js';
 import {
     escapeHtmlForDisplay, resolveAwarenessCue, backfillDefaults,
-    resolveScaleStep, generateScaleSteps, sanitizeScaleSteps, defaultEffectShape, defaultEffect,
+    resolveScaleStep, generateScaleSteps, sanitizeScaleSteps,
+    defaultTrackerShape, defaultTracker, defaultEffectShape, defaultEffect, migrateEffectsToTrackers,
     restingLevelValue,
 } from './lib/pure.js';
 import { infoIcon, PROMPT_TEMPLATE_EXAMPLES, EFFECT_TYPE_LABELS } from './lib/render.js';
 import { applySingleEffect, clearAllAwarenessCues, awarenessCueKey } from './pipeline.js';
-import { expandedEffectIds, effectActiveTab, renderEffectList } from './render.js';
+import {
+    expandedTrackerIds, trackerActiveTab, renderTrackerList,
+    expandedEffectIds, effectActiveTab, renderEffectList,
+} from './render.js';
 import { refreshStatusPanelContents, toggleStatusPanel } from './statusPanel.js';
+
+export function refreshTrackerList(settings) {
+    $('#st_mangler_trackers').html(renderTrackerList(settings));
+    // Structural changes (add/delete/reorder/mode swaps) can change which trackers the floating
+    // status panel should list state for, so keep it in sync whenever the list rebuilds.
+    refreshStatusPanelContents(settings);
+}
 
 export function refreshEffectList(settings) {
     $('#st_mangler_effects').html(renderEffectList(settings));
-    // Structural changes (add/delete/reorder/mode swaps) can change which effects the floating
-    // status panel should list, so keep it in sync whenever the list rebuilds.
     refreshStatusPanelContents(settings);
 }
 
@@ -30,6 +41,13 @@ function setFieldByPath(obj, path, value) {
 
 // No-ops past either edge of the list rather than disabling/hiding the buttons on first/last
 // row — simplest option that still can't produce an invalid state.
+function moveTracker(settings, id, delta) {
+    const index = settings.trackers.findIndex(t => t.id === id);
+    const target = index + delta;
+    if (index === -1 || target < 0 || target >= settings.trackers.length) return;
+    [settings.trackers[index], settings.trackers[target]] = [settings.trackers[target], settings.trackers[index]];
+}
+
 function moveEffect(settings, id, delta) {
     const index = settings.effects.findIndex(e => e.id === id);
     const target = index + delta;
@@ -45,8 +63,8 @@ function moveScaleStep(effect, index, delta) {
     [steps[index], steps[target]] = [steps[target], steps[index]];
 }
 
-function downloadEffectsJson(effects, filename) {
-    const data = { version: 1, effects };
+function downloadSettingsJson(trackers, effects, filename) {
+    const data = { version: 2, trackers, effects };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -57,39 +75,56 @@ function downloadEffectsJson(effects, filename) {
 }
 
 function exportEffects(settings) {
-    downloadEffectsJson(settings.effects, 'message-mangler-effects.json');
+    downloadSettingsJson(settings.trackers, settings.effects, 'message-mangler-effects.json');
 }
 
 // Slugifies the label for a readable filename, falling back to the effect id if unlabeled.
-function exportSingleEffect(effect) {
+// Includes the effect's own tracker in the export (if it still resolves) so a single-effect
+// export is self-contained and meaningfully re-importable on its own.
+function exportSingleEffect(effect, settings) {
+    const tracker = settings.trackers.find(t => t.id === effect.trackerId);
     const slug = effect.label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-    downloadEffectsJson([effect], `message-mangler-effect-${slug || effect.id}.json`);
+    downloadSettingsJson(tracker ? [tracker] : [], [effect], `message-mangler-effect-${slug || effect.id}.json`);
 }
 
-// Imported effects always get fresh ids and are appended (never replace/overwrite existing
-// effects), so importing is always a safe, additive action — reorder/delete afterward as needed.
-async function importEffectsFromFile(file, settings) {
+// Imported trackers/effects always get fresh ids and are appended (never replace/overwrite
+// existing ones), so importing is always a safe, additive action — reorder/delete afterward as
+// needed. Dependency references are always dropped on import — same reasoning as duplicate: a
+// foreign id almost certainly doesn't resolve to anything meaningful in this settings' tracker
+// list. A pre-decoupling export (no "trackers" array — effects still carry a fused `.trigger`) is
+// split via the same one-time migration real settings go through before importing, so old export
+// files stay importable.
+async function importSettingsFromFile(file, settings) {
     try {
         const text = await file.text();
         const data = JSON.parse(text);
         if (!Array.isArray(data.effects)) throw new Error('No "effects" array found in file.');
 
-        for (const imported of data.effects) {
-            const effect = { ...imported, id: `effect_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` };
-            backfillDefaults(effect, defaultEffectShape(effect.type), warn);
-            sanitizeScaleSteps(effect.llmRewrite.scaleSteps, warn);
-            // Never import a dependency reference — it almost certainly points at a foreign id
-            // that doesn't exist in this settings' effects list (or, worse, coincidentally
-            // collides with an unrelated existing effect and silently links to the wrong one).
-            // Set directly rather than via migrateEffectDependency — an imported file could carry
-            // either the legacy single-field shape or the current dependencies array, and either
-            // way the answer is the same: drop it.
-            effect.trigger.dependencies = [];
-            settings.effects.push(effect);
+        const staging = {
+            trackers: structuredClone(Array.isArray(data.trackers) ? data.trackers : []),
+            effects: structuredClone(data.effects),
+        };
+        if (!Array.isArray(data.trackers)) migrateEffectsToTrackers(staging, warn);
+
+        const idMap = new Map();
+        for (const tracker of staging.trackers) {
+            const freshId = `tracker_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+            idMap.set(tracker.id, freshId);
+            const freshTracker = { ...tracker, id: freshId, dependencies: [] };
+            backfillDefaults(freshTracker, defaultTrackerShape(), warn);
+            settings.trackers.push(freshTracker);
         }
+        for (const effect of staging.effects) {
+            const freshEffect = { ...effect, id: `effect_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` };
+            freshEffect.trackerId = idMap.get(effect.trackerId) ?? null;
+            backfillDefaults(freshEffect, defaultEffectShape(freshEffect.type), warn);
+            sanitizeScaleSteps(freshEffect.llmRewrite.scaleSteps, warn);
+            settings.effects.push(freshEffect);
+        }
+        refreshTrackerList(settings);
         refreshEffectList(settings);
         context.saveSettingsDebounced();
-        toastr.success(`Imported ${data.effects.length} effect(s).`);
+        toastr.success(`Imported ${staging.effects.length} effect(s) and ${staging.trackers.length} tracker(s).`);
     } catch (err) {
         warn('Import failed:', err.message);
         toastr.error(`Import failed: ${err.message}`);
@@ -279,8 +314,16 @@ export function addSettingsUI() {
                         <span id="st_mangler_detection_profile_wrap">${renderDetectionProfileOptions(settings)}</span>
                     </label>
                     <hr>
-                    <small><b>Effects</b> (applied in order). Each can run always or be triggered progressively by
-                    detected keywords/LLM classification of the recent scene.</small>
+                    <small><b>Trackers</b> (detection + level state). Each Effect below is gated by one, chosen on its Basics tab.</small>
+                    <div id="st_mangler_trackers">${renderTrackerList(settings)}</div>
+                    <div class="flex-container">
+                        <div id="st_mangler_add_tracker" class="menu_button menu_button_icon">
+                            <i class="fa-solid fa-plus"></i> Add tracker
+                        </div>
+                    </div>
+                    <hr>
+                    <small><b>Effects</b> (applied in order). Each is behavior only — a transform and/or an awareness cue,
+                    gated by the tracker it's paired with.</small>
                     <div id="st_mangler_effects">${renderEffectList(settings)}</div>
                     <div class="flex-container">
                         <div id="st_mangler_add_effect" class="menu_button menu_button_icon">
@@ -292,7 +335,7 @@ export function addSettingsUI() {
                         <div id="st_mangler_collapse_all" class="menu_button menu_button_icon">
                             <i class="fa-solid fa-angles-up"></i> Collapse all
                         </div>
-                        <div id="st_mangler_status_panel_toggle" class="menu_button menu_button_icon" title="Floating panel showing each progressive effect's live level while you chat">
+                        <div id="st_mangler_status_panel_toggle" class="menu_button menu_button_icon" title="Floating panel showing each progressive tracker's live level while you chat">
                             <i class="fa-solid fa-gauge-high"></i> Status panel
                         </div>
                         <div id="st_mangler_export" class="menu_button menu_button_icon">
@@ -334,21 +377,196 @@ export function addSettingsUI() {
         context.saveSettingsDebounced();
     });
 
+    // --- Trackers ---
+
+    $('#st_mangler_add_tracker').on('click', () => {
+        const tracker = defaultTracker();
+        settings.trackers.push(tracker);
+        expandedTrackerIds.add(tracker.id);
+        refreshTrackerList(settings);
+        context.saveSettingsDebounced();
+    });
+
+    $('#st_mangler_trackers').on('click', '.st_mangler_tab_btn', function () {
+        const row = $(this).closest('.st_mangler_tracker');
+        const id = row.data('tracker-id');
+        const tab = $(this).data('tab');
+        trackerActiveTab.set(id, tab);
+        row.find('.st_mangler_tab_btn').removeClass('active');
+        $(this).addClass('active');
+        row.find('.st_mangler_tab_pane').hide();
+        row.find(`.st_mangler_tab_pane[data-tab="${tab}"]`).show();
+    });
+
+    $('#st_mangler_trackers').on('click', '.st_mangler_tracker_toggle', function () {
+        const id = $(this).closest('.st_mangler_tracker').data('tracker-id');
+        if (expandedTrackerIds.has(id)) expandedTrackerIds.delete(id); else expandedTrackerIds.add(id);
+        refreshTrackerList(settings);
+    });
+
+    $('#st_mangler_trackers').on('click', '.st_mangler_tracker_dispel_now', function () {
+        const tracker = settings.trackers.find(t => t.id === $(this).closest('.st_mangler_tracker').data('tracker-id'));
+        if (!tracker) return;
+        setTrackerLevel(tracker, restingLevelValue(tracker.restingLevel));
+        setTrackerTurnsActive(tracker, 0);
+        setTrackerLocked(tracker, false);
+        log(`Manually dispelled "${tracker.label}".`);
+    });
+
+    // Same three-call reset as "Dispel now" above, but to an author-chosen level instead of
+    // always the resting level — never auto-locks even if the chosen level clears lockThreshold,
+    // since this is a manual override, not a real rating crossing the threshold.
+    $('#st_mangler_trackers').on('click', '.st_mangler_tracker_set_level', function () {
+        const row = $(this).closest('.st_mangler_tracker');
+        const tracker = settings.trackers.find(t => t.id === row.data('tracker-id'));
+        if (!tracker) return;
+        const level = Number(row.find('.st_mangler_set_level_input').val());
+        setTrackerLevel(tracker, level);
+        setTrackerTurnsActive(tracker, 0);
+        setTrackerLocked(tracker, false);
+        log(`Manually set "${tracker.label}" level to ${level.toFixed(2)}.`);
+    });
+
+    $('#st_mangler_trackers').on('click', '.st_mangler_tracker_duplicate', function () {
+        const id = $(this).closest('.st_mangler_tracker').data('tracker-id');
+        const index = settings.trackers.findIndex(t => t.id === id);
+        if (index === -1) return;
+        const copy = { ...structuredClone(settings.trackers[index]), id: `tracker_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` };
+        copy.dependencies = []; // never inherit dependencies — could point at the wrong tracker after copying
+        // Chat-scoped state (level/turns/locked/binding/active-override) lives in chatMetadata
+        // keyed by tracker id (see lib/chatState.js), not on the tracker object — the copy gets a
+        // fresh id above, so it naturally starts fresh/unbound with nothing to strip here.
+        settings.trackers.splice(index + 1, 0, copy);
+        expandedTrackerIds.add(copy.id);
+        refreshTrackerList(settings);
+        context.saveSettingsDebounced();
+    });
+
+    // Deletion never blocks on Effects still referencing this tracker — same fail-open precedent
+    // as a dangling dependency/character-binding/connection-profile elsewhere in this codebase;
+    // any referencing Effect just shows a caution icon (see renderEffectRow) until repointed.
+    $('#st_mangler_trackers').on('click', '.st_mangler_tracker_delete', function () {
+        const id = $(this).closest('.st_mangler_tracker').data('tracker-id');
+        settings.trackers = settings.trackers.filter(t => t.id !== id);
+        expandedTrackerIds.delete(id);
+        trackerActiveTab.delete(id);
+        refreshTrackerList(settings);
+        refreshEffectList(settings); // any effect referencing this tracker now shows the dangling warning
+        context.saveSettingsDebounced();
+    });
+
+    $('#st_mangler_trackers').on('click', '.st_mangler_dependency_add', function () {
+        const id = $(this).closest('.st_mangler_tracker').data('tracker-id');
+        const tracker = settings.trackers.find(t => t.id === id);
+        if (!tracker) return;
+        tracker.dependencies.push({ trackerId: '', minLevel: 0.5 });
+        refreshTrackerList(settings);
+        context.saveSettingsDebounced();
+    });
+
+    $('#st_mangler_trackers').on('click', '.st_mangler_dependency_delete', function () {
+        const id = $(this).closest('.st_mangler_tracker').data('tracker-id');
+        const tracker = settings.trackers.find(t => t.id === id);
+        if (!tracker) return;
+        tracker.dependencies.splice($(this).data('dep-index'), 1);
+        refreshTrackerList(settings);
+        context.saveSettingsDebounced();
+    });
+
+    $('#st_mangler_trackers').on('click', '.st_mangler_tracker_move_up', function () {
+        moveTracker(settings, $(this).closest('.st_mangler_tracker').data('tracker-id'), -1);
+        refreshTrackerList(settings);
+        context.saveSettingsDebounced();
+    });
+    $('#st_mangler_trackers').on('click', '.st_mangler_tracker_move_down', function () {
+        moveTracker(settings, $(this).closest('.st_mangler_tracker').data('tracker-id'), 1);
+        refreshTrackerList(settings);
+        context.saveSettingsDebounced();
+    });
+
+    $('#st_mangler_trackers').on('click', '.st_mangler_tracker_test_detect', async function () {
+        const row = $(this).closest('.st_mangler_tracker');
+        const tracker = settings.trackers.find(t => t.id === row.data('tracker-id'));
+        if (!tracker) return;
+        const output = row.find('.st_mangler_tracker_test_output');
+        output.val('Testing detection...');
+        try {
+            output.val(await runDetectionTest(tracker, row.find('.st_mangler_tracker_test_input').val()));
+        } catch (err) {
+            output.val(`Error: ${err.message}`);
+        }
+    });
+
+    $('#st_mangler_trackers').on('input', '.st_mangler_field', function () {
+        const row = $(this).closest('.st_mangler_tracker');
+        const id = row.data('tracker-id');
+        const tracker = settings.trackers.find(t => t.id === id);
+        if (!tracker) return;
+
+        const fieldPath = $(this).data('field');
+        const isCheckbox = $(this).attr('type') === 'checkbox';
+        const isNumberLike = $(this).attr('type') === 'range' || $(this).attr('type') === 'number';
+        const value = isCheckbox ? !!$(this).prop('checked') : isNumberLike ? Number($(this).val()) : $(this).val();
+        setFieldByPath(tracker, fieldPath, value);
+        context.saveSettingsDebounced();
+
+        // Raising lockThreshold above the current (already-locked) level should unlock the
+        // tracker immediately — otherwise it stays permanently locked even once its level no
+        // longer qualifies under the new, higher threshold, until a dispel keyword happens to
+        // fire. Only ever unlocks here (never locks) — locking is still exclusively
+        // applyLlmRating's job when level actually crosses the threshold via a real rating.
+        if (fieldPath === 'lockThreshold' && getTrackerLocked(tracker) && getTrackerLevel(tracker) < tracker.lockThreshold) {
+            setTrackerLocked(tracker, false);
+            log(`"${tracker.label}" unlocked — lock threshold raised above its current level.`);
+        }
+
+        // mode/detector/llmIntegrationMode changes swap visible sub-fields — full row re-render
+        // needed. A dependency row's trackerId pick also needs it: re-evaluates the
+        // broken/blocked status line, and every OTHER tracker's own dependency picker needs its
+        // cycle-safe/already-chosen option list re-evaluated as the graph changes. minLevel needs
+        // it too — the blocked-status text embeds the configured value directly ("waiting for X
+        // to reach level <minLevel>"), and raising/lowering it can flip whether the prerequisite
+        // is currently satisfied at all, so the caution icon can go stale exactly like the
+        // trackerId case if this isn't included.
+        if (fieldPath === 'mode' || fieldPath === 'detector' || fieldPath === 'llmIntegrationMode' || /^dependencies\.\d+\.(trackerId|minLevel)$/.test(fieldPath)) {
+            refreshTrackerList(settings);
+        } else if (fieldPath === 'enabled' || fieldPath === 'label') {
+            // Header-row edits that don't re-render the tracker list but do change what the
+            // floating status panel shows, and (label only) what Effects' tracker-picker options
+            // display.
+            refreshStatusPanelContents(settings);
+            if (fieldPath === 'label') refreshEffectList(settings);
+        }
+    });
+
+    // --- Effects ---
+
     $('#st_mangler_add_effect').on('click', () => {
+        // Auto-creates and pairs a fresh 'always'-mode tracker so the zero-config single-effect
+        // experience is unchanged from before the decoupling — users who want a shared tracker
+        // can still build one first via "Add tracker" and pick it from the effect's Basics tab.
+        const tracker = defaultTracker();
+        settings.trackers.push(tracker);
         const effect = defaultEffect('regex');
+        effect.trackerId = tracker.id;
         settings.effects.push(effect);
         expandedEffectIds.add(effect.id); // newly added effects open expanded, ready to configure
+        refreshTrackerList(settings);
         refreshEffectList(settings);
         context.saveSettingsDebounced();
     });
 
     $('#st_mangler_expand_all').on('click', () => {
         for (const effect of settings.effects) expandedEffectIds.add(effect.id);
+        for (const tracker of settings.trackers) expandedTrackerIds.add(tracker.id);
         refreshEffectList(settings);
+        refreshTrackerList(settings);
     });
     $('#st_mangler_collapse_all').on('click', () => {
         expandedEffectIds.clear();
+        expandedTrackerIds.clear();
         refreshEffectList(settings);
+        refreshTrackerList(settings);
     });
     $('#st_mangler_status_panel_toggle').on('click', () => toggleStatusPanel(settings));
 
@@ -357,7 +575,7 @@ export function addSettingsUI() {
     $('#st_mangler_import_file').on('change', async function () {
         const file = this.files[0];
         this.value = ''; // allow re-importing the same filename later
-        if (file) await importEffectsFromFile(file, settings);
+        if (file) await importSettingsFromFile(file, settings);
     });
 
     $('#st_mangler_effects').on('click', '.st_mangler_tab_btn', function () {
@@ -377,38 +595,11 @@ export function addSettingsUI() {
         refreshEffectList(settings);
     });
 
-    $('#st_mangler_effects').on('click', '.st_mangler_effect_dispel_now', function () {
-        const effect = settings.effects.find(e => e.id === $(this).closest('.st_mangler_effect').data('effect-id'));
-        if (!effect) return;
-        setEffectLevel(effect, restingLevelValue(effect.trigger.restingLevel));
-        setEffectTurnsActive(effect, 0);
-        setEffectLocked(effect, false);
-        log(`Manually dispelled "${effect.label}".`);
-    });
-
-    // Same three-call reset as "Dispel now" above, but to an author-chosen level instead of
-    // always 0 — never auto-locks even if the chosen level clears lockThreshold, since this is a
-    // manual override, not a real rating crossing the threshold.
-    $('#st_mangler_effects').on('click', '.st_mangler_effect_set_level', function () {
-        const row = $(this).closest('.st_mangler_effect');
-        const effect = settings.effects.find(e => e.id === row.data('effect-id'));
-        if (!effect) return;
-        const level = Number(row.find('.st_mangler_set_level_input').val());
-        setEffectLevel(effect, level);
-        setEffectTurnsActive(effect, 0);
-        setEffectLocked(effect, false);
-        log(`Manually set "${effect.label}" level to ${level.toFixed(2)}.`);
-    });
-
     $('#st_mangler_effects').on('click', '.st_mangler_effect_duplicate', function () {
         const id = $(this).closest('.st_mangler_effect').data('effect-id');
         const index = settings.effects.findIndex(e => e.id === id);
         if (index === -1) return;
         const copy = { ...structuredClone(settings.effects[index]), id: `effect_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` };
-        copy.trigger.dependencies = []; // never inherit dependencies — could point at the wrong effect after copying
-        // Character binding/chat-activation overrides live in chatMetadata keyed by effect id
-        // (see lib/chatState.js), not on the effect object — the copy gets a fresh id above, so
-        // it naturally starts unbound/default-active with nothing to strip here.
         settings.effects.splice(index + 1, 0, copy); // inserted right after the original
         expandedEffectIds.add(copy.id); // opens expanded, same convention as a newly-added effect
         refreshEffectList(settings);
@@ -418,7 +609,7 @@ export function addSettingsUI() {
     $('#st_mangler_effects').on('click', '.st_mangler_effect_export_single', function () {
         const id = $(this).closest('.st_mangler_effect').data('effect-id');
         const effect = settings.effects.find(e => e.id === id);
-        if (effect) exportSingleEffect(effect);
+        if (effect) exportSingleEffect(effect, settings);
     });
 
     $('#st_mangler_effects').on('click', '.st_mangler_effect_delete', function () {
@@ -494,24 +685,6 @@ export function addSettingsUI() {
         context.saveSettingsDebounced();
     });
 
-    $('#st_mangler_effects').on('click', '.st_mangler_dependency_add', function () {
-        const id = $(this).closest('.st_mangler_effect').data('effect-id');
-        const effect = settings.effects.find(e => e.id === id);
-        if (!effect) return;
-        effect.trigger.dependencies.push({ effectId: '', minLevel: 0.5 });
-        refreshEffectList(settings);
-        context.saveSettingsDebounced();
-    });
-
-    $('#st_mangler_effects').on('click', '.st_mangler_dependency_delete', function () {
-        const id = $(this).closest('.st_mangler_effect').data('effect-id');
-        const effect = settings.effects.find(e => e.id === id);
-        if (!effect) return;
-        effect.trigger.dependencies.splice($(this).data('dep-index'), 1);
-        refreshEffectList(settings);
-        context.saveSettingsDebounced();
-    });
-
     $('#st_mangler_effects').on('click', '.st_mangler_effect_move_up', function () {
         moveEffect(settings, $(this).closest('.st_mangler_effect').data('effect-id'), -1);
         refreshEffectList(settings);
@@ -552,19 +725,6 @@ export function addSettingsUI() {
         }
     });
 
-    $('#st_mangler_effects').on('click', '.st_mangler_test_detect', async function () {
-        const row = $(this).closest('.st_mangler_effect');
-        const effect = settings.effects.find(e => e.id === row.data('effect-id'));
-        if (!effect) return;
-        const output = row.find('.st_mangler_test_output');
-        output.val('Testing detection...');
-        try {
-            output.val(await runDetectionTest(effect, row.find('.st_mangler_test_input').val()));
-        } catch (err) {
-            output.val(`Error: ${err.message}`);
-        }
-    });
-
     $('#st_mangler_effects').on('input', '.st_mangler_field', function () {
         const row = $(this).closest('.st_mangler_effect');
         const id = row.data('effect-id');
@@ -573,30 +733,13 @@ export function addSettingsUI() {
 
         const fieldPath = $(this).data('field');
         const isCheckbox = $(this).attr('type') === 'checkbox';
-        const isRange = $(this).attr('type') === 'range' || $(this).attr('type') === 'number';
-        const value = isCheckbox ? !!$(this).prop('checked') : isRange ? Number($(this).val()) : $(this).val();
+        const isNumberLike = $(this).attr('type') === 'range' || $(this).attr('type') === 'number';
+        const value = isCheckbox ? !!$(this).prop('checked') : isNumberLike ? Number($(this).val()) : $(this).val();
         setFieldByPath(effect, fieldPath, value);
         context.saveSettingsDebounced();
 
-        // Raising lockThreshold above the current (already-locked) level should unlock the
-        // effect immediately — otherwise a locked effect stays permanently locked even once
-        // its level no longer qualifies under the new, higher threshold, until a dispel keyword
-        // happens to fire. Only ever unlocks here (never locks) — locking is still exclusively
-        // applyLlmRating's job when level actually crosses the threshold via a real rating.
-        if (fieldPath === 'trigger.lockThreshold' && getEffectLocked(effect) && getEffectLevel(effect) < effect.trigger.lockThreshold) {
-            setEffectLocked(effect, false);
-            log(`"${effect.label}" unlocked — lock threshold raised above its current level.`);
-        }
-
-        // Type, trigger.mode, trigger.detector, or trigger.llmIntegrationMode changes swap
-        // visible sub-fields — full row re-render needed. A dependency row's effectId pick also
-        // needs it: re-evaluates the broken/blocked status line, and every OTHER effect's own
-        // dependency picker needs its cycle-safe/already-chosen option list re-evaluated as the
-        // graph changes. minLevel needs it too — the blocked-status text embeds the configured
-        // value directly ("waiting for X to reach level <minLevel>"), and raising/lowering it can
-        // flip whether the prerequisite is currently satisfied at all, so the caution icon can go
-        // stale exactly like the effectId case if this isn't included.
-        if (fieldPath === 'type' || fieldPath === 'trigger.mode' || fieldPath === 'trigger.detector' || fieldPath === 'trigger.llmIntegrationMode' || fieldPath === 'llmRewrite.scaleMode' || /^trigger\.dependencies\.\d+\.(effectId|minLevel)$/.test(fieldPath)) {
+        // type/llmRewrite.scaleMode changes swap visible sub-fields — full row re-render needed.
+        if (fieldPath === 'type' || fieldPath === 'llmRewrite.scaleMode') {
             refreshEffectList(settings);
         } else if (fieldPath === 'enabled' || fieldPath === 'label') {
             // Header-row edits that don't re-render the effect list but do change what the

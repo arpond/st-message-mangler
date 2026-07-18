@@ -3,8 +3,8 @@ import { context, getCurrentCharacterId } from './lib/context.js';
 import { log, warn } from './lib/log.js';
 import { getSettings, debugLog } from './lib/settings.js';
 import {
-    getEffectLevel, setEffectLevel, getEffectTurnsActive, setEffectTurnsActive, getEffectLocked, setEffectLocked,
-    consumeTransformPaused, isPrerequisiteMet, getEffectChatBinding, getEffectChatActiveOverride,
+    getTrackerLevel, setTrackerLevel, getTrackerTurnsActive, setTrackerTurnsActive, getTrackerLocked, setTrackerLocked,
+    consumeTransformPaused, isPrerequisiteMet, getTrackerChatBinding, getTrackerChatActiveOverride,
 } from './lib/chatState.js';
 import { runBatchedLlmDetectors, runLlmRewrite } from './lib/llmClient.js';
 import {
@@ -14,14 +14,14 @@ import {
     meetsDirectionalThreshold,
 } from './lib/pure.js';
 
-// Gates which hook is allowed to update an effect's level — 'user' for onMessageSent,
+// Gates which hook is allowed to update a tracker's level — 'user' for onMessageSent,
 // 'character' for onCharacterMessageRendered. Applies to both detector types identically;
 // it's about whose turn counts as evidence, not how that evidence is judged.
-function shouldDetectFromSource(effect, source) {
-    return effect.trigger.detectSource === 'both' || effect.trigger.detectSource === source;
+function shouldDetectFromSource(tracker, source) {
+    return tracker.detectSource === 'both' || tracker.detectSource === source;
 }
 
-// Resolves which character a message belongs to, for effect.characterAvatar binding
+// Resolves which character a message belongs to, for a tracker's chat-scoped character binding
 // (group-chat-aware detection/target). `original_avatar` is ST's own group-chat identity field
 // (see group-chats.js), reliably set there — but not confirmed to always be set on a regular
 // (non-group) single-character chat's messages, so this falls back to force_avatar and then the
@@ -34,27 +34,29 @@ function resolveMessageCharacterAvatar(message) {
     return context.characters[getCurrentCharacterId()]?.avatar ?? null;
 }
 
-// Wraps matchesBoundCharacter with a fail-open check: if the effect's chat-scoped bound character
-// was since deleted (no longer present in context.characters), treat it the same as unbound
-// rather than leaving the effect permanently unable to match anyone — same fail-open precedent as
-// isPrerequisiteMet for a broken effect dependency reference.
-function effectMatchesCharacter(effect, source, messageCharacterAvatar) {
-    const boundCharacterAvatar = getEffectChatBinding(effect);
+// Wraps matchesBoundCharacter with a fail-open check: if the tracker's chat-scoped bound
+// character was since deleted (no longer present in context.characters), treat it the same as
+// unbound rather than leaving the tracker permanently unable to match anyone — same fail-open
+// precedent as isPrerequisiteMet for a broken dependency reference. Any Effect referencing this
+// tracker inherits its binding — Effects have no binding of their own.
+function trackerMatchesCharacter(tracker, source, messageCharacterAvatar) {
+    const boundCharacterAvatar = getTrackerChatBinding(tracker);
     if (boundCharacterAvatar && !context.characters.some(c => c.avatar === boundCharacterAvatar)) return true;
     return matchesBoundCharacter(boundCharacterAvatar, source, messageCharacterAvatar);
 }
 
-// Resolves whether an effect is active in the current chat — combines its global
+// Resolves whether a tracker is active in the current chat — combines its global
 // chatActivationMode default with any per-chat override (see lib/chatState.js's
-// getEffectChatActiveOverride and pure.js's resolveChatActiveState).
-function isEffectActiveInChat(effect) {
-    return resolveChatActiveState(effect.chatActivationMode, getEffectChatActiveOverride(effect));
+// getTrackerChatActiveOverride and pure.js's resolveChatActiveState). Any Effect referencing this
+// tracker inherits its active state — Effects have no activation override of their own.
+function isTrackerActiveInChat(tracker) {
+    return resolveChatActiveState(tracker.chatActivationMode, getTrackerChatActiveOverride(tracker));
 }
 
 // Dispel keywords are checked unconditionally (regardless of detector mode) and take priority
 // over the normal escalation/read-last-known logic for this turn. Also tracks how many
-// consecutive turns the effect has stayed active, auto-dispelling once maxTurnsActive is
-// exceeded so an escalated effect doesn't just plateau forever. The level/turns math itself
+// consecutive turns the tracker has stayed active, auto-dispelling once maxTurnsActive is
+// exceeded so an escalated tracker doesn't just plateau forever. The level/turns math itself
 // lives in resolveDetectionLevelUpdate (lib/pure.js); this wrapper handles the chatMetadata
 // read/write and logging around it.
 // detectionText is the caller's originalText, not necessarily the message's full current .mes —
@@ -62,35 +64,36 @@ function isEffectActiveInChat(effect) {
 // suffix (see splitContinuationSuffix), so keyword/dispel matching here only ever sees new
 // content instead of re-matching (and re-incrementing on) a keyword that already hit in an
 // earlier, already-mangled portion of the same message.
-function updateAndGetEffectLevel(effect, detectionText, prerequisiteMet) {
-    debugLog(`updateAndGetEffectLevel "${effect.label}": detector=${effect.trigger.detector}, levelBefore=${getEffectLevel(effect).toFixed(2)}${prerequisiteMet ? '' : ' (blocked — dependency not met)'}`);
+function updateAndGetTrackerLevel(tracker, detectionText, prerequisiteMet) {
+    debugLog(`updateAndGetTrackerLevel "${tracker.label}": detector=${tracker.detector}, levelBefore=${getTrackerLevel(tracker).toFixed(2)}${prerequisiteMet ? '' : ' (blocked — dependency not met)'}`);
 
-    const result = resolveDetectionLevelUpdate(getEffectLevel(effect), getEffectTurnsActive(effect), detectionText, effect.trigger, prerequisiteMet);
+    const result = resolveDetectionLevelUpdate(getTrackerLevel(tracker), getTrackerTurnsActive(tracker), detectionText, tracker, prerequisiteMet);
 
     if (result.dispelled) {
-        setEffectTurnsActive(effect, 0);
-        setEffectLocked(effect, false);
-        log(`Dispelled "${effect.label}" — dispel keyword matched.`);
-        return setEffectLevel(effect, restingLevelValue(effect.trigger.restingLevel));
+        setTrackerTurnsActive(tracker, 0);
+        setTrackerLocked(tracker, false);
+        log(`Dispelled "${tracker.label}" — dispel keyword matched.`);
+        return setTrackerLevel(tracker, restingLevelValue(tracker.restingLevel));
     }
 
     // llm detector: level is read-only here (runBatchedLlmDetectors updates it elsewhere) — avoid
-    // an unnecessary chatMetadata write/DOM refresh every message for effects whose level didn't
+    // an unnecessary chatMetadata write/DOM refresh every message for trackers whose level didn't
     // actually change on this path.
-    const level = effect.trigger.detector === 'llm' ? result.level : setEffectLevel(effect, result.level);
-    debugLog(`updateAndGetEffectLevel "${effect.label}": ${effect.trigger.detector === 'llm' ? 'llm detector, reading last-known level' : 'keyword'}=${level.toFixed(2)}`);
+    const level = tracker.detector === 'llm' ? result.level : setTrackerLevel(tracker, result.level);
+    debugLog(`updateAndGetTrackerLevel "${tracker.label}": ${tracker.detector === 'llm' ? 'llm detector, reading last-known level' : 'keyword'}=${level.toFixed(2)}`);
 
-    const turns = setEffectTurnsActive(effect, result.turnsActive);
+    const turns = setTrackerTurnsActive(tracker, result.turnsActive);
     if (result.autoDispelled) {
-        setEffectTurnsActive(effect, 0);
-        log(`Auto-dispelled "${effect.label}" — active for ${turns} turns (max ${effect.trigger.maxTurnsActive}).`);
-        return setEffectLevel(effect, restingLevelValue(effect.trigger.restingLevel));
+        setTrackerTurnsActive(tracker, 0);
+        log(`Auto-dispelled "${tracker.label}" — active for ${turns} turns (max ${tracker.maxTurnsActive}).`);
+        return setTrackerLevel(tracker, restingLevelValue(tracker.restingLevel));
     }
     return level;
 }
 
 // Single point of type dispatch, shared by the real pipeline below and the settings panel's
-// per-effect "Test" button (which runs one effect in isolation at level=1, no trigger involved).
+// per-effect "Test" button (which runs one effect in isolation at a simulated level, no tracker
+// involved).
 export async function applySingleEffect(text, effect, level, trueOriginal = text, respondingTo = '', recentMessages = []) {
     switch (effect.type) {
         case 'regex': return applyRegexEffect(text, effect.regex, warn);
@@ -101,8 +104,9 @@ export async function applySingleEffect(text, effect, level, trueOriginal = text
 }
 
 // target gates the *transform*: whether an effect touches this speaker's message at all.
-// Independent of trigger.detectSource, which gates whether this speaker's message can update
-// the effect's *level* — an effect can detect from one speaker and transform the other's text.
+// Independent of its tracker's detectSource, which gates whether this speaker's message can
+// update the tracker's *level* — an effect can be driven by detection from one speaker and
+// transform the other's text.
 function effectAppliesToTarget(effect, source) {
     return effect.target === 'both' || effect.target === source;
 }
@@ -144,6 +148,12 @@ function updateAwarenessCue(effect, level, active, trend = 'steady') {
 // the intended behavior for a lookback classifier, but re-rating the *same* turn a second time
 // just because it got interrupted by Continue would double-apply cumulative/cumulative-lock
 // increments (and waste a call for absolute mode, which just overwrites anyway).
+//
+// Two-phase per call: Phase A resolves each Tracker's level/trend exactly once regardless of how
+// many Effects reference it (today always exactly one — see DEVELOPMENT.md — but the resolution
+// is already structured this way since re-running detection per referencing Effect would be
+// wrong the moment more than one exists); Phase B walks Effects in list order (preserving the
+// existing chained-transform ordering) consuming whichever Tracker's resolved level applies.
 export async function applyEffects(originalText, message, settings, source, isContinuation = false, respondingTo = '', recentMessages = []) {
     const budget = { remaining: settings.maxLlmCallsPerMessage };
     // Consumed once per call (not per effect) so a "pause next message" request applies uniformly
@@ -152,28 +162,53 @@ export async function applyEffects(originalText, message, settings, source, isCo
     // skipped.
     const transformPaused = consumeTransformPaused();
     const messageCharacterAvatar = resolveMessageCharacterAvatar(message);
-    debugLog(`applyEffects: starting for source=${source}, ${settings.effects.length} effect(s) configured, LLM call budget=${budget.remaining}${transformPaused ? ', transforms paused for this message' : ''}`);
+    debugLog(`applyEffects: starting for source=${source}, ${settings.trackers.length} tracker(s)/${settings.effects.length} effect(s) configured, LLM call budget=${budget.remaining}${transformPaused ? ', transforms paused for this message' : ''}`);
     // Permanent diagnostic aid for character-binding troubleshooting — kept deliberately verbose
     // (not folded into the single-line summary above) since binding bugs are otherwise very hard
     // to distinguish from the intentional decoupling between detection and transform (see
     // DEVELOPMENT.md's "Detection vs. transform decoupling" note) without seeing the actual
-    // avatar values being compared. Only logs for effects that are actually bound, to avoid
-    // spamming every unbound effect on every message.
+    // avatar values being compared. Only logs for trackers that are actually bound, to avoid
+    // spamming every unbound tracker on every message.
     debugLog(`applyEffects: resolved messageCharacterAvatar=${JSON.stringify(messageCharacterAvatar)} (message.original_avatar=${JSON.stringify(message.original_avatar)}, message.force_avatar=${JSON.stringify(message.force_avatar)}, message.name=${JSON.stringify(message.name)})`);
-    for (const e of settings.effects) {
-        const boundCharacterAvatar = getEffectChatBinding(e);
+    for (const t of settings.trackers) {
+        const boundCharacterAvatar = getTrackerChatBinding(t);
         if (boundCharacterAvatar) {
-            debugLog(`applyEffects: effect "${e.label}" bound to characterAvatar=${JSON.stringify(boundCharacterAvatar)}, matches this message=${effectMatchesCharacter(e, source, messageCharacterAvatar)}, boundCharacterExistsInRoster=${context.characters.some(c => c.avatar === boundCharacterAvatar)}`);
+            debugLog(`applyEffects: tracker "${t.label}" bound to characterAvatar=${JSON.stringify(boundCharacterAvatar)}, matches this message=${trackerMatchesCharacter(t, source, messageCharacterAvatar)}, boundCharacterExistsInRoster=${context.characters.some(c => c.avatar === boundCharacterAvatar)}`);
         }
     }
 
-    const dueLlmDetectors = settings.effects.filter(e => e.enabled && isEffectActiveInChat(e) && e.trigger.mode === 'progressive'
-        && e.trigger.detector === 'llm' && shouldDetectFromSource(e, source) && effectMatchesCharacter(e, source, messageCharacterAvatar)
-        // A locked cumulative-lock effect ignores its rating entirely (see applyLlmRating), so
+    // --- Phase A: resolve every Tracker's level/trend once ---
+    const resolvedTrackers = new Map();
+    for (const tracker of settings.trackers) {
+        if (!tracker.enabled || !isTrackerActiveInChat(tracker)) {
+            debugLog(`applyEffects: tracker "${tracker.label}" frozen — ${!tracker.enabled ? 'disabled' : 'inactive in this chat'}.`);
+            resolvedTrackers.set(tracker.id, { level: getTrackerLevel(tracker), trend: 'steady' });
+            continue;
+        }
+        const previousLevel = tracker.mode === 'always' ? 1 : getTrackerLevel(tracker);
+        // Detection runs regardless of any referencing Effect's target — a tracker can be driven
+        // by a speaker whose message no Effect using it actually transforms (e.g. an Effect with
+        // target: 'user' but its tracker's detectSource: 'both', so the character's dialogue
+        // still builds the level even though only the user's own messages get rewritten). A
+        // tracker whose detectSource doesn't include this speaker still reports whatever level
+        // the OTHER speaker's messages put it at — it just never lets this speaker's own message
+        // move that level (updateAndGetTrackerLevel is skipped, not just its result ignored).
+        const level = tracker.mode === 'always'
+            ? 1
+            : shouldDetectFromSource(tracker, source) && trackerMatchesCharacter(tracker, source, messageCharacterAvatar)
+                ? updateAndGetTrackerLevel(tracker, originalText, isPrerequisiteMet(tracker, settings.trackers))
+                : getTrackerLevel(tracker);
+        const trend = tracker.mode === 'always' ? 'steady' : resolveLevelTrend(previousLevel, level, tracker.hitDirection);
+        resolvedTrackers.set(tracker.id, { level, trend });
+    }
+
+    const dueLlmDetectors = settings.trackers.filter(t => t.enabled && isTrackerActiveInChat(t) && t.mode === 'progressive'
+        && t.detector === 'llm' && shouldDetectFromSource(t, source) && trackerMatchesCharacter(t, source, messageCharacterAvatar)
+        // A locked cumulative-lock tracker ignores its rating entirely (see applyLlmRating), so
         // including it just pays batch-prompt tokens for a discarded result.
-        && !(e.trigger.llmIntegrationMode === 'cumulative-lock' && getEffectLocked(e)));
+        && !(t.llmIntegrationMode === 'cumulative-lock' && getTrackerLocked(t)));
     if (dueLlmDetectors.length > 0 && isContinuation) {
-        debugLog(`applyEffects: skipping LLM detector batch for ${dueLlmDetectors.length} effect(s) — continuation of the same message, already rated this turn.`);
+        debugLog(`applyEffects: skipping LLM detector batch for ${dueLlmDetectors.length} tracker(s) — continuation of the same message, already rated this turn.`);
     } else if (dueLlmDetectors.length > 0) {
         if (budget.remaining > 0) {
             budget.remaining--;
@@ -184,71 +219,65 @@ export async function applyEffects(originalText, message, settings, source, isCo
             // get confused by overlapping quiet-generation requests. Serializing costs the
             // detector's own latency on this message instead of running for free in the
             // background, but only in this specific combination.
-            const hasRewriteEffect = settings.effects.some(e => e.enabled && isEffectActiveInChat(e) && e.type === 'llm-rewrite' && effectAppliesToTarget(e, source) && effectMatchesCharacter(e, source, messageCharacterAvatar));
+            const hasRewriteEffect = settings.effects.some(e => {
+                if (!e.enabled || e.type !== 'llm-rewrite' || !effectAppliesToTarget(e, source)) return false;
+                const tracker = settings.trackers.find(t => t.id === e.trackerId);
+                return !!tracker && isTrackerActiveInChat(tracker) && trackerMatchesCharacter(tracker, source, messageCharacterAvatar);
+            });
             if (hasRewriteEffect) {
-                debugLog(`applyEffects: awaiting LLM detector batch for ${dueLlmDetectors.length} effect(s) (serialized — an llm-rewrite effect is active this message), budget remaining after=${budget.remaining}`);
-                await runBatchedLlmDetectors(dueLlmDetectors, settings.effects);
+                debugLog(`applyEffects: awaiting LLM detector batch for ${dueLlmDetectors.length} tracker(s) (serialized — an llm-rewrite effect is active this message), budget remaining after=${budget.remaining}`);
+                await runBatchedLlmDetectors(dueLlmDetectors, settings.trackers);
             } else {
-                debugLog(`applyEffects: firing LLM detector batch for ${dueLlmDetectors.length} effect(s) (background), budget remaining after=${budget.remaining}`);
-                runBatchedLlmDetectors(dueLlmDetectors, settings.effects); // fire-and-forget, once for the whole message
+                debugLog(`applyEffects: firing LLM detector batch for ${dueLlmDetectors.length} tracker(s) (background), budget remaining after=${budget.remaining}`);
+                runBatchedLlmDetectors(dueLlmDetectors, settings.trackers); // fire-and-forget, once for the whole message
             }
         } else {
-            warn(`Skipping LLM detector batch (${dueLlmDetectors.length} effect(s)) — LLM call budget (${settings.maxLlmCallsPerMessage}) exhausted for this message.`);
+            warn(`Skipping LLM detector batch (${dueLlmDetectors.length} tracker(s)) — LLM call budget (${settings.maxLlmCallsPerMessage}) exhausted for this message.`);
         }
     }
 
+    // --- Phase B: walk Effects in list order, each consuming its Tracker's resolved level ---
     let text = originalText;
     for (const effect of settings.effects) {
+        const tracker = settings.trackers.find(t => t.id === effect.trackerId);
+        if (!tracker) {
+            debugLog(`applyEffects: "${effect.label}" skipped — dangling trackerId (no matching tracker), treated as inert.`);
+            updateAwarenessCue(effect, 0, false);
+            continue;
+        }
         if (!effect.enabled) {
             debugLog(`applyEffects: "${effect.label}" skipped — disabled.`);
             updateAwarenessCue(effect, 0, false);
             continue;
         }
-        if (!isEffectActiveInChat(effect)) {
-            debugLog(`applyEffects: "${effect.label}" skipped — inactive in this chat.`);
+        if (!isTrackerActiveInChat(tracker)) {
+            debugLog(`applyEffects: "${effect.label}" skipped — its tracker is inactive in this chat.`);
             updateAwarenessCue(effect, 0, false);
             continue;
         }
 
-        // Read before updateAndGetEffectLevel mutates the persisted level, so {{trend}} can
-        // compare this turn's result against what it actually was a moment ago. 'always'-mode
-        // effects have no persisted level history at all (level is a hardcoded constant 1 every
-        // time) — nothing to trend, so they're always 'steady'.
-        const previousLevel = effect.trigger.mode === 'always' ? 1 : getEffectLevel(effect);
-
-        // Detection runs regardless of target — an effect can detect from a speaker it doesn't
-        // transform (e.g. target: 'user' but detectSource: 'both', so the character's dialogue
-        // still builds the level even though only the user's own messages get rewritten).
-        // An effect whose detectSource doesn't include this speaker can still fire its transform
-        // here using whatever level the OTHER speaker's messages put it at — it just never lets
-        // this speaker's own message move that level (updateAndGetEffectLevel is skipped, not
-        // just its result ignored).
-        const level = effect.trigger.mode === 'always'
-            ? 1
-            : shouldDetectFromSource(effect, source) && effectMatchesCharacter(effect, source, messageCharacterAvatar)
-                ? updateAndGetEffectLevel(effect, originalText, isPrerequisiteMet(effect, settings.effects))
-                : getEffectLevel(effect);
-        const trend = effect.trigger.mode === 'always' ? 'steady' : resolveLevelTrend(previousLevel, level, effect.trigger.hitDirection);
+        const { level, trend } = resolvedTrackers.get(tracker.id);
 
         // Awareness cue reflects the effect's true current state regardless of target — an
         // effect can be "active" (driving the narrative cue) without this speaker's message
         // being the one it transforms.
-        updateAwarenessCue(effect, level, meetsDirectionalThreshold(level, effect.trigger.minLevelToApply, effect.trigger.hitDirection), trend);
+        const active = meetsDirectionalThreshold(level, tracker.minLevelToApply, tracker.hitDirection);
+        updateAwarenessCue(effect, level, active, trend);
 
         if (!effectAppliesToTarget(effect, source)) {
             debugLog(`applyEffects: "${effect.label}" — detection updated, but target=${effect.target} excludes ${source}; no transform.`);
             continue;
         }
-        if (!effectMatchesCharacter(effect, source, messageCharacterAvatar)) {
-            debugLog(`applyEffects: "${effect.label}" — bound to a different character than this message's speaker; no transform.`);
+        if (!trackerMatchesCharacter(tracker, source, messageCharacterAvatar)) {
+            debugLog(`applyEffects: "${effect.label}" — its tracker is bound to a different character than this message's speaker; no transform.`);
             continue;
         }
         if (transformPaused) {
             debugLog(`applyEffects: "${effect.label}" — detection updated, but transforms are paused for this message.`);
             continue;
         }
-        if (!meetsDirectionalThreshold(level, effect.trigger.minLevelToApply, effect.trigger.hitDirection)) {
-            debugLog(`applyEffects: "${effect.label}" skipped — threshold not reached: level=${level.toFixed(2)}, minLevelToApply=${effect.trigger.minLevelToApply}, hitDirection=${effect.trigger.hitDirection}`);
+        if (!active) {
+            debugLog(`applyEffects: "${effect.label}" skipped — threshold not reached: level=${level.toFixed(2)}, minLevelToApply=${tracker.minLevelToApply}, hitDirection=${tracker.hitDirection}`);
             continue;
         }
 
@@ -318,7 +347,7 @@ export async function onMessageSent(chatId) {
 }
 
 // Runs the same pipeline as onMessageSent, but for the AI's message: detection always runs
-// (gated by trigger.detectSource, same as onMessageSent), and the transform only runs for
+// (gated by each tracker's detectSource, same as onMessageSent), and the transform only runs for
 // effects whose target includes 'character' (see effectAppliesToTarget). Unlike onMessageSent,
 // this message is already rendered to the DOM by the time this hook fires (CHARACTER_MESSAGE_RENDERED
 // fires after render, whereas MESSAGE_SENT fires before) — so a text change here needs an

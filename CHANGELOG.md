@@ -4,6 +4,38 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v35
+
+- **Decouple tracking from behavior — Trackers and Effects are now separate entities.** What was
+  one fused `effect` (detector/level config bundled with a transform/awareness cue) is now two:
+  a **Tracker** (detector, level/decay/lock state, dependencies — its own list in the settings
+  panel, with the Trigger/Dependency tabs that used to live inside the effect editor) and a
+  slimmer **Effect** (type/target/awarenessCue/prompt, referencing exactly one Tracker via a new
+  picker on its Basics tab). Motivated by three recurring pains with chained `llm-rewrite`
+  effects — rewrites overwriting each other, prompt complexity juggling original/current text, and
+  N sequential LLM calls scaling with effect count — this is phase 1 (the decoupling itself) of a
+  two-phase plan; a deterministic rule-composition layer letting one Effect react to multiple
+  Trackers is not built yet.
+  - **Migration is automatic and lossless**: existing effects split into a Tracker (keeping the
+    original effect's id, so every persisted per-chat level/turns/locked/binding/active-override
+    carries over untouched) and a freshly-id'd Effect. No settings re-entry needed.
+  - **New capability**: `enabled` is now independently meaningful on both — a disabled Tracker
+    freezes (no detection/decay) while an Effect referencing it can still react to the frozen
+    level, or vice versa. Previously these were the same on/off switch.
+  - Chat-scoped activation and character binding (floating status panel) now live entirely on the
+    Tracker; any Effect using it inherits both automatically.
+  - "Add effect" auto-creates and pairs a fresh Tracker, so the zero-config single-effect
+    workflow is unchanged; "Add tracker" also exists standalone for building a shared Tracker.
+  - Export/Import now includes Trackers alongside Effects; an export from an older version (no
+    `trackers` array) is still importable, migrated on the way in.
+  - Detection testing ("Test detection") moved to the Tracker's own Test tab.
+  - Deleting a Tracker that Effects still reference doesn't block — those Effects show a caution
+    icon and are treated as inert, same fail-open precedent as a dangling dependency/character
+    binding/connection profile elsewhere in this extension.
+  - **Fixed** (found during live verification): the migration left every split Tracker's `label`
+    blank — it lived on the old fused effect's top level, not under `.trigger`, so it was never
+    carried over. Trackers now inherit their source effect's label on split.
+
 ## v34
 
 - **Scale by rating magnitude for LLM cumulative modes** — new opt-in checkbox (Cumulative/
