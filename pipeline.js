@@ -1,7 +1,7 @@
 import { extension_prompt_types, extension_prompt_roles } from '../../../../script.js';
 import { context, getCurrentCharacterId } from './lib/context.js';
 import { log, warn } from './lib/log.js';
-import { getSettings, debugLog } from './lib/settings.js';
+import { getSettings, debugLog, isDebugEnabled } from './lib/settings.js';
 import {
     getTrackerLevel, setTrackerLevel, getTrackerTurnsActive, setTrackerTurnsActive, getTrackerLocked, setTrackerLocked,
     consumeTransformPaused, isPrerequisiteMet, getTrackerChatBinding, getTrackerChatActiveOverride,
@@ -173,11 +173,17 @@ export async function applyEffects(originalText, message, settings, source, isCo
     // DEVELOPMENT.md's "Detection vs. transform decoupling" note) without seeing the actual
     // avatar values being compared. Only logs for trackers that are actually bound, to avoid
     // spamming every unbound tracker on every message.
-    debugLog(`applyEffects: resolved messageCharacterAvatar=${JSON.stringify(messageCharacterAvatar)} (message.original_avatar=${JSON.stringify(message.original_avatar)}, message.force_avatar=${JSON.stringify(message.force_avatar)}, message.name=${JSON.stringify(message.name)})`);
-    for (const t of settings.trackers) {
-        const boundCharacterAvatar = getTrackerChatBinding(t);
-        if (boundCharacterAvatar) {
-            debugLog(`applyEffects: tracker "${t.label}" bound to characterAvatar=${JSON.stringify(boundCharacterAvatar)}, matches this message=${trackerMatchesCharacter(t, source, messageCharacterAvatar)}, boundCharacterExistsInRoster=${context.characters.some(c => c.avatar === boundCharacterAvatar)}`);
+    // Guarded by isDebugEnabled() rather than left to debugLog's own check — template-literal
+    // arguments evaluate eagerly at the call site, so without this guard every message would pay
+    // for the JSON.stringify calls and (worse) the per-tracker roster .some() scan below even with
+    // debug logging off.
+    if (isDebugEnabled()) {
+        debugLog(`applyEffects: resolved messageCharacterAvatar=${JSON.stringify(messageCharacterAvatar)} (message.original_avatar=${JSON.stringify(message.original_avatar)}, message.force_avatar=${JSON.stringify(message.force_avatar)}, message.name=${JSON.stringify(message.name)})`);
+        for (const t of settings.trackers) {
+            const boundCharacterAvatar = getTrackerChatBinding(t);
+            if (boundCharacterAvatar) {
+                debugLog(`applyEffects: tracker "${t.label}" bound to characterAvatar=${JSON.stringify(boundCharacterAvatar)}, matches this message=${trackerMatchesCharacter(t, source, messageCharacterAvatar)}, boundCharacterExistsInRoster=${context.characters.some(c => c.avatar === boundCharacterAvatar)}`);
+            }
         }
     }
 
