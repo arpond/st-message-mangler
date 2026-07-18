@@ -82,6 +82,39 @@ test('renderTriggerPanel hides increment per hit (but not decay) when hit behavi
     assert.match(html, /style="display: block;">\s*Decay per turn/);
 });
 
+test('renderTriggerPanel labels Increment/Min level for hitDirection=increase (default)', () => {
+    const tracker = defaultTracker();
+    tracker.detector = 'keyword';
+    const html = renderTriggerPanel(tracker, 0, 0, false);
+    assert.match(html, />\s*Increment per hit</);
+    assert.doesNotMatch(html, /Decrement per hit/);
+    assert.match(html, />\s*Min level to apply \(below this/);
+    assert.doesNotMatch(html, /Min drop to apply/);
+});
+
+test('renderTriggerPanel relabels Increment -> Decrement and Min level -> Min drop when hitDirection=decrease', () => {
+    const tracker = defaultTracker();
+    tracker.detector = 'keyword';
+    tracker.hitDirection = 'decrease';
+    const html = renderTriggerPanel(tracker, 0, 0, false);
+    assert.match(html, />\s*Decrement per hit</);
+    assert.doesNotMatch(html, />\s*Increment per hit</);
+    assert.match(html, />\s*Min drop to apply \(once the level has fallen/);
+    assert.doesNotMatch(html, /Min level to apply \(below this/);
+});
+
+test('renderTriggerPanel labels Decay per turn by restingLevel, independent of hitDirection', () => {
+    const tracker = defaultTracker();
+    tracker.detector = 'keyword';
+    tracker.hitDirection = 'decrease';
+    tracker.restingLevel = 'high';
+    const html = renderTriggerPanel(tracker, 0, 0, false);
+    assert.match(html, /Decay per turn \(drifts up toward Resting level\)/);
+    tracker.restingLevel = 'low';
+    const html2 = renderTriggerPanel(tracker, 0, 0, false);
+    assert.match(html2, /Decay per turn \(drifts down toward Resting level\)/);
+});
+
 test('renderTriggerPanel reflects the level/turnsActive/locked values passed in, not internal state', () => {
     const tracker = defaultTrackerShape();
     const html = renderTriggerPanel(tracker, 0.42, 7, true);
@@ -97,6 +130,25 @@ test('EFFECT_TYPE_LABELS includes a label for the "none" (awareness-only) type',
 test('renderTypeFields explains "none" rather than returning blank', () => {
     const html = renderTypeFields(defaultEffect('none'));
     assert.match(html, /No transform/);
+});
+
+test('renderTypeFields no longer renders the Scaling dropdown for llm-rewrite (moved to Rules tab)', () => {
+    const html = renderTypeFields(defaultEffect('llm-rewrite'));
+    assert.doesNotMatch(html, /data-field="llmRewrite\.scaleMode"/);
+    assert.match(html, /moved to the Rules tab/);
+});
+
+test('renderRulesPanel renders the Scaling dropdown as its first field for llm-rewrite', () => {
+    const effect = defaultEffect('llm-rewrite');
+    const html = renderRulesPanel(effect, []);
+    const scalingPos = html.indexOf('data-field="llmRewrite.scaleMode"');
+    const rulesHeaderPos = html.indexOf('data-field="ruleMode"');
+    assert.ok(scalingPos > -1 && scalingPos < rulesHeaderPos, 'Scaling select should render before the ruleMode select');
+});
+
+test('renderRulesPanel omits the Scaling dropdown for non-llm-rewrite effect types', () => {
+    const html = renderRulesPanel(defaultEffect('regex'), []);
+    assert.doesNotMatch(html, /data-field="llmRewrite\.scaleMode"/);
 });
 
 test('renderTestPanel hides the level slider and Run test button for type "none"', () => {
@@ -232,4 +284,40 @@ test('renderRulesPanel shows a per-rule hint when a rule has no conditions', () 
     effect.rules = [defaultRule()];
     const html = renderRulesPanel(effect, []);
     assert.match(html, /this rule always matches/);
+});
+
+test('renderRulesPanel renders a step ladder instead of instruction text when scaleMode is steps', () => {
+    const effect = defaultEffect('llm-rewrite');
+    effect.llmRewrite.scaleMode = 'steps';
+    const rule = defaultRule();
+    rule.steps = [{ threshold: 0.5, text: 'mild fear' }];
+    effect.rules = [rule];
+    const html = renderRulesPanel(effect, []);
+    assert.match(html, /Step ladder/);
+    assert.match(html, /mild fear/);
+    assert.match(html, new RegExp(`data-field="rules\\.0\\.steps\\.0\\.text"`));
+    assert.doesNotMatch(html, /data-field="rules\.0\.text"/);
+});
+
+test('renderRulesPanel hides rule instruction text for a "none" effect, since there is nothing to substitute it into', () => {
+    const effect = defaultEffect('none');
+    const rule = defaultRule();
+    rule.conditions = [{ trackerId: 'a', minLevel: 0.5 }];
+    rule.text = 'stale leftover text';
+    effect.rules = [rule];
+    const html = renderRulesPanel(effect, []);
+    assert.doesNotMatch(html, /data-field="rules\.0\.text"/);
+    assert.doesNotMatch(html, /Instruction text/);
+    assert.doesNotMatch(html, /Step ladder/);
+    assert.match(html, /this rule's conditions still gate its activation/);
+    // Conditions themselves still render — gating is the whole point for a "none" effect.
+    assert.match(html, /data-field="rules\.0\.conditions\.0\.trackerId"/);
+});
+
+test('renderRulesPanel hides rule instruction text for regex/drunk effects too, not just "none"', () => {
+    const effect = defaultEffect('regex');
+    effect.rules = [defaultRule()];
+    const html = renderRulesPanel(effect, []);
+    assert.doesNotMatch(html, /Instruction text/);
+    assert.match(html, /this rule's conditions still gate its activation/);
 });

@@ -155,17 +155,22 @@ behavior — "below 0.3 do X, 0.3-0.7 do Y, above 0.9 do Z" — has to be writte
 template itself, with the model reading `{{level}}`/`{{level_pct}}` and deciding which band
 applies. That's the same class of problem as the `0.99` cap above: it works only as well as the
 model's own numeral interpretation. **Structured steps** moves that decision out of the prompt:
-define a list of threshold + instruction-text steps in the effect's UI, and the extension picks
-the step with the highest threshold at or below the current level entirely in code, exposing the
-result as a new `{{scale_instruction}}` placeholder. The model never has to read a number and map
-it onto a range — it's just handed the one instruction that already applies. `{{level}}`/
-`{{level_pct}}` remain available in Structured steps mode too, for any part of the template that
-still wants the raw number.
+define a list of threshold + instruction-text steps, and the extension picks the step with the
+highest threshold at or below the current level entirely in code, exposing the result as a new
+`{{scale_instruction}}` placeholder. The model never has to read a number and map it onto a range
+— it's just handed the one instruction that already applies. `{{level}}`/`{{level_pct}}` remain
+available in Structured steps mode too, for any part of the template that still wants the raw
+number. The **Scaling** dropdown and its Structured-steps editor live on the effect's **Rules**
+tab (see "Effect rules — reacting to combinations of Trackers" below), not the **Transform** tab
+(prompt template/scene lookback/max response length) — it's the first choice on the Rules tab
+because Rules is also where each rule's own step ladder gets defined once any rule exists. The
+Transform tab is hidden entirely for a "No transform" effect, which has nothing to configure
+there.
 
-The effect's **Rules** tab (see "Effect rules — reacting to combinations of Trackers" below) can
-also feed `{{scale_instruction}}` — when the effect has any rules configured, the matching rule's
-text is used instead of the Structured-steps threshold lookup, same placeholder either way, so a
-template never has to know or care which one supplied it.
+The effect's **Rules** tab can also feed `{{scale_instruction}}` directly — when the effect has
+any rules configured, the matching rule's own output (its flat text, or its own step ladder in
+Structured steps mode) is used instead of the plain Structured-steps threshold lookup, same
+placeholder either way, so a template never has to know or care which one supplied it.
 
 Building a ladder of several steps by hand gets tedious — the **Generate** control above the step
 list fills in N steps at computed thresholds in one click (Linear: evenly spaced; Exponential:
@@ -237,7 +242,10 @@ with:
     "Decrease" also mirrors **Min level to apply**/**Lock threshold** below (same 0–1 meaning,
     "how far toward the hit direction's extreme") so they still mean the same thing either way —
     e.g. a "trust" tracker with resting **High** and direction **Decrease** starts fully trusting
-    and erodes on a betrayal keyword, recovering on quiet turns.
+    and erodes on a betrayal keyword, recovering on quiet turns. The UI relabels the fields that'd
+    otherwise read backwards under Decrease: **Increment per hit** becomes **Decrement per hit**,
+    and **Min level to apply** becomes **Min drop to apply**, wording only — the stored values and
+    comparisons are unchanged.
   - **Hit behavior** — **Gradual** (default, nudges by **Increment per hit**) or **Jump** (any hit
     sends the level straight to the extreme in **Hit direction**, e.g. a "fresh wound" that's
     instantly intense then fades). **Increment per hit** is hidden when Jump is selected, since
@@ -370,31 +378,49 @@ can't accidentally point at the wrong tracker.
 
 Every effect has one required Tracker (Basics tab) — that tracker still always supplies
 `{{level}}`/`{{level_pct}}`/`{{trend}}`, chat-activation, and character binding, no matter what's
-on this tab. The optional **Rules** tab lets that *same* effect additionally react to
-combinations of *other* trackers too, without needing separate effects per combination. Each rule
-is one or more conditions (tracker + minimum level, AND-gate — every listed tracker must meet its
-own minimum) plus instruction text. For an `llm-rewrite` effect, a matching rule's text becomes
-`{{scale_instruction}}` — the *same* placeholder Structured steps fills in from a threshold list,
+on this tab. For an `llm-rewrite` effect, the Rules tab's first field is **Scaling** (Freeform vs.
+Structured steps — see above); everything else on the tab is optional. The optional **Rules** list
+lets that *same* effect additionally react to combinations of *other* trackers too, without
+needing separate effects per combination. Each rule is one or more conditions (tracker + minimum
+level, AND-gate — every listed tracker must meet its own minimum) plus either flat instruction
+text (Scaling: Freeform) or its own step ladder (Scaling: Structured steps — see below). For an
+`llm-rewrite` effect, a matching rule's resolved output becomes `{{scale_instruction}}` — the
+*same* placeholder Structured steps fills in from a threshold list when no rules are configured,
 so there's nothing to reconcile in the template: whichever mechanism is active for this effect
-(Structured steps, or Rules once any are configured) supplies that one placeholder, never both at
-once. `regex`/`drunk` effects ignore rule text (nothing to substitute it into) but still get
-gated by rules the same way. Rules are evaluated in order:
+supplies that one placeholder, never both at once. `regex`/`drunk`/`none` (awareness-only) effects
+have no `{{scale_instruction}}` to fill, so their rule rows show only conditions — the instruction
+text/step ladder field is hidden for these types rather than shown and silently ignored. Rules
+still gate activation for these types exactly the same way (and for `none`, gating is the whole
+point — it's how you drive an awareness cue or status badge off a tracker combination without any
+transform at all). Rules are evaluated in order:
 
 - **First match wins** (default) — the first rule whose every condition is satisfied is used;
   later rules are never checked. A rule with *no* conditions always matches, so putting one last
   gives you an explicit "otherwise" fallback. This is how "if A and B, do X; if just A, do Y; if
   just B, do Z" gets expressed: three ordered rules, each naming its own condition set.
-- **Stack all matches** — instead of stopping at the first match, every matching rule's text is
-  joined together into `{{scale_instruction}}` and all of them count as "active."
+- **Stack all matches** — instead of stopping at the first match, every matching rule's resolved
+  output is joined together into `{{scale_instruction}}` and all of them count as "active."
 
 Empty rules (the default for every effect) leaves this effect's activity gated exactly the way it
 always was — its own tracker's **Min level to apply** (Trigger tab), and (for `llm-rewrite`)
-`{{scale_instruction}}` still comes from Structured steps if that's configured. The moment a rule
-is added, rules take over both: the effect's own tracker's `minLevelToApply` is no longer
-consulted for it, and Structured steps' threshold lookup is bypassed in favor of whichever rule
-matched (other effects still using that tracker or those steps directly are unaffected). A rule
-condition referencing a tracker that's since been deleted is dropped from that rule's AND-gate
-(fails open), same as a broken Tracker dependency.
+`{{scale_instruction}}` still comes from the Rules tab's default Structured-steps ladder if
+Scaling is set to that. The moment a rule is added, rules take over both: the effect's own
+tracker's `minLevelToApply` is no longer consulted for it, and the default ladder's threshold
+lookup is bypassed in favor of whichever rule matched (other effects still using that tracker are
+unaffected). A rule condition referencing a tracker that's since been deleted is dropped from that
+rule's AND-gate (fails open), same as a broken Tracker dependency.
+
+**Rules + Structured steps together.** When Scaling is set to Structured steps *and* the effect
+has Rules configured, each rule gets its **own private step ladder** instead of one flat
+instruction — the Rules tab shows a threshold+text editor per rule in place of the plain text box.
+A matched rule resolves `{{scale_instruction}}` from its own steps against the primary tracker's
+current level, the same threshold-picking logic Structured steps normally uses, just scoped to
+that one rule. This lets a rule define both *when* it applies (its conditions) and *exactly what
+to say at each level once it does* (its steps) — e.g. one prompt ladder for "fear alone" and a
+completely different one for "fear while cornered," rather than reusing the same level-banded
+prose for every condition. The Rules tab's own default Structured-steps ladder (shown above the
+rule list) is the fallback used only while no rules exist; it's unused (and the panel says so, in
+effect, by not showing it) once any rule is added.
 
 ### Worked examples: resting level, hit direction, and dependencies together
 

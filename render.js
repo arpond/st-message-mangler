@@ -67,8 +67,14 @@ export function renderTrackerList(settings) {
 
 export function renderEffectRow(effect, allTrackers = []) {
     const expanded = expandedEffectIds.has(effect.id);
-    const activeTab = effectActiveTab.get(effect.id) ?? 'basics';
-    const tabStrip = EFFECT_TABS.map(tab => `
+    // Transform tab (regex pattern / drunk intensity / llm-rewrite prompt) has nothing to show for
+    // a "none" (awareness-only) effect — there's no transform to configure — so it's hidden
+    // entirely rather than shown empty. If the row was left on that tab from a previous type, fall
+    // back to Basics rather than landing on a tab with no button to reselect it.
+    const visibleTabs = EFFECT_TABS.filter(tab => tab.id !== 'behavior' || effect.type !== 'none');
+    let activeTab = effectActiveTab.get(effect.id) ?? 'basics';
+    if (!visibleTabs.some(tab => tab.id === activeTab)) activeTab = 'basics';
+    const tabStrip = visibleTabs.map(tab => `
         <div class="st_mangler_tab_btn ${tab.id === activeTab ? 'active' : ''}" data-tab="${tab.id}">${tab.label}</div>`).join('');
     const pane = (id, html) => `
         <div class="st_mangler_tab_pane" data-tab="${id}" style="display: ${id === activeTab ? 'block' : 'none'};">${html}</div>`;
@@ -120,7 +126,7 @@ export function renderEffectRow(effect, allTrackers = []) {
                         ${field('number', 'promptLevelCap', effect.promptLevelCap, 'min="0" max="1" step="0.01" style="max-width: 5em;"')}
                     </label>`)}
                 ${pane('rules', renderRulesPanel(effect, allTrackers))}
-                ${pane('behavior', renderTypeFields(effect))}
+                ${effect.type === 'none' ? '' : pane('behavior', renderTypeFields(effect))}
                 ${pane('test', renderTestPanel(effect))}
             </div>
         </div>`;

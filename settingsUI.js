@@ -67,9 +67,9 @@ function setFieldByPath(obj, path, value) {
     target[parts[parts.length - 1]] = value;
 }
 
-// Shared by moveTracker/moveEffect/moveScaleStep below — no-ops past either edge of the list
-// rather than disabling/hiding the buttons on first/last row, the simplest option that still
-// can't produce an invalid state.
+// Shared by moveTracker/moveEffect/scale-step and rule-step handlers below — no-ops past either
+// edge of the list rather than disabling/hiding the buttons on first/last row, the simplest
+// option that still can't produce an invalid state.
 function moveItem(list, index, delta) {
     const target = index + delta;
     if (index === -1 || target < 0 || target >= list.length) return;
@@ -84,8 +84,12 @@ function moveEffect(settings, id, delta) {
     moveItem(settings.effects, settings.effects.findIndex(e => e.id === id), delta);
 }
 
-function moveScaleStep(effect, index, delta) {
-    moveItem(effect.llmRewrite.scaleSteps, index, delta);
+// Scale-step editor is shared between the effect-level default ladder (llmRewrite.scaleSteps)
+// and a single rule's own ladder (rules.<i>.steps, see renderRulesPanel) — data-rule-index on
+// the clicked button (present only in the rule case) picks which array to mutate.
+function scaleStepsFor(effect, ruleIndex) {
+    if (ruleIndex === undefined) return effect.llmRewrite.scaleSteps;
+    return effect.rules[ruleIndex]?.steps;
 }
 
 function downloadSettingsJson(trackers, effects, filename) {
@@ -668,9 +672,14 @@ export function addSettingsUI() {
         const id = row.data('effect-id');
         const effect = settings.effects.find(e => e.id === id);
         if (!effect) return;
+        const ruleIndex = $(this).data('rule-index');
+        const steps = scaleStepsFor(effect, ruleIndex);
+        if (!steps) return;
         const count = Number(row.find('.st_mangler_scale_gen_count').val());
         const curve = row.find('.st_mangler_scale_gen_curve').val();
-        effect.llmRewrite.scaleSteps = generateScaleSteps(count, curve, effect.llmRewrite.scaleSteps);
+        const generated = generateScaleSteps(count, curve, steps);
+        if (ruleIndex === undefined) effect.llmRewrite.scaleSteps = generated;
+        else effect.rules[ruleIndex].steps = generated;
         refreshEffectList(settings);
         context.saveSettingsDebounced();
     });
@@ -679,7 +688,9 @@ export function addSettingsUI() {
         const id = $(this).closest('.st_mangler_effect').data('effect-id');
         const effect = settings.effects.find(e => e.id === id);
         if (!effect) return;
-        effect.llmRewrite.scaleSteps.push({ threshold: 0, text: '' });
+        const steps = scaleStepsFor(effect, $(this).data('rule-index'));
+        if (!steps) return;
+        steps.push({ threshold: 0, text: '' });
         refreshEffectList(settings);
         context.saveSettingsDebounced();
     });
@@ -688,7 +699,9 @@ export function addSettingsUI() {
         const id = $(this).closest('.st_mangler_effect').data('effect-id');
         const effect = settings.effects.find(e => e.id === id);
         if (!effect) return;
-        effect.llmRewrite.scaleSteps.splice($(this).data('step-index'), 1);
+        const steps = scaleStepsFor(effect, $(this).data('rule-index'));
+        if (!steps) return;
+        steps.splice($(this).data('step-index'), 1);
         refreshEffectList(settings);
         context.saveSettingsDebounced();
     });
@@ -697,7 +710,9 @@ export function addSettingsUI() {
         const id = $(this).closest('.st_mangler_effect').data('effect-id');
         const effect = settings.effects.find(e => e.id === id);
         if (!effect) return;
-        moveScaleStep(effect, $(this).data('step-index'), -1);
+        const steps = scaleStepsFor(effect, $(this).data('rule-index'));
+        if (!steps) return;
+        moveItem(steps, $(this).data('step-index'), -1);
         refreshEffectList(settings);
         context.saveSettingsDebounced();
     });
@@ -706,7 +721,9 @@ export function addSettingsUI() {
         const id = $(this).closest('.st_mangler_effect').data('effect-id');
         const effect = settings.effects.find(e => e.id === id);
         if (!effect) return;
-        moveScaleStep(effect, $(this).data('step-index'), 1);
+        const steps = scaleStepsFor(effect, $(this).data('rule-index'));
+        if (!steps) return;
+        moveItem(steps, $(this).data('step-index'), 1);
         refreshEffectList(settings);
         context.saveSettingsDebounced();
     });

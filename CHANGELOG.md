@@ -4,6 +4,73 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v40
+
+- **Per-rule step ladders — Rules and Structured steps compose instead of one replacing the
+  other** — a rule (Rules tab) can now carry its own `steps: [{threshold, text}]` ladder, used
+  instead of its flat instruction text when the effect's Scaling (Transform tab) is set to
+  Structured steps. A matched rule resolves `{{scale_instruction}}` from its own steps against the
+  primary tracker's level (same highest-threshold-≤-level picking logic as plain Structured steps,
+  just scoped to that rule), so a rule now defines both *when* it applies (its conditions) and
+  *exactly what to say at each level* (its steps), rather than one flat prompt shared across every
+  condition. `resolveRuleOutput` (`lib/pure.js`) gained `level`/`scaleMode` params to do this
+  resolution; both default to the prior freeform behavior so existing rules (flat `text`, no
+  `steps`) are unaffected. `renderScaleSteps` (`lib/render.js`) is now shared between the
+  effect-level default ladder and each rule's own ladder (`fieldPath`/`ruleIndex` params); the
+  five scale-step button handlers in `settingsUI.js` route through a new `scaleStepsFor(effect,
+  ruleIndex)` helper to target the right array. The Transform tab's own default ladder becomes
+  unused (and says so) once any rule exists, same "rules take over" precedent the activation gate
+  already follows. 5 new unit/render tests (177 total).
+- **Moved the Scaling dropdown from the Transform tab to the Rules tab, as its first field** —
+  follow-up to the above: Scaling (Freeform vs. Structured steps) and the default Structured-steps
+  ladder now live at the top of the Rules tab instead of the Transform tab, ahead of the Rule-mode
+  selector and rule list — reflects that Scaling now governs *how rules resolve*
+  `{{scale_instruction}}` (flat text vs. per-rule step ladder) as much as it governs the
+  no-rules-configured default, so it belongs with the mechanism it controls rather than split
+  across two tabs. The Transform tab keeps only the prompt template, scene lookback, and max
+  response length. No schema change — `llmRewrite.scaleMode`/`llmRewrite.scaleSteps` are unchanged,
+  this is UI placement only; `renderRulesPanel` (`lib/render.js`) now renders the Scaling
+  `<select>` (gated to `effect.type === 'llm-rewrite'`) before the Rules section. 3 new render
+  tests (180 total).
+- **Hid rule instruction text/step ladder for effect types that can't use it** — a rule's
+  instruction text (or, in Structured steps mode, its step ladder) only ever feeds
+  `{{scale_instruction}}`, which only `llm-rewrite` effects substitute anywhere. `regex`/`drunk`/
+  `none` rule rows previously still showed the field, so it looked live but was silently discarded
+  — confusing especially for `none` (awareness-only) effects, where rules exist purely to gate an
+  awareness cue and have no transform at all. `renderRulesPanel` now shows a short explanatory note
+  instead ("this rule's conditions still gate its activation/awareness cue...") for any
+  `effect.type !== 'llm-rewrite'`; conditions still render and are still fully functional for
+  every type. No schema/resolution change — existing stored `rule.text` on a non-`llm-rewrite`
+  effect is untouched, just no longer shown. 2 new render tests (182 total).
+- **Renamed the "Behavior" tab to "Transform"** — now that Scaling has moved to the Rules tab,
+  what's left on this tab is purely the transform config per type (regex pattern, drunk intensity,
+  or the llm-rewrite prompt template/scene lookback/max response length) — "Transform" names that
+  directly instead of the more general "Behavior". Label-only change in `EFFECT_TABS`
+  (`lib/render.js`); the tab's internal id (`'behavior'`) is unchanged, so no other wiring moved.
+  Also hid the tab entirely for `none` (awareness-only) effects, which have no transform to
+  configure — `renderEffectRow` (`render.js`) now filters it out of the tab strip and skips
+  rendering its pane for that type, falling back to the Basics tab if a row was left on it before
+  switching an effect's type to `none`.
+
+- **Increment/Decay/Min-level labels now reflect Hit direction / Resting level instead of reading
+  backwards under Decrease** — "Increment per hit" and "Min level to apply" were worded for
+  `hitDirection: 'increase'` only; under `'decrease'` a hit still subtracts and the threshold still
+  means "how far toward the extreme" (mirrored — `level <= 1 - threshold`, documented in Hit
+  direction's own tooltip), but the plain-English labels read as if a hit added and the level had
+  to stay *above* the number, which is backwards once hits move it down. `renderTriggerPanel`
+  (`lib/render.js`) now computes `incrementLabel`/`minLevelLabel` from `tracker.hitDirection`:
+  Increase keeps "Increment per hit"/"Min level to apply (below this...)" unchanged; Decrease shows
+  "Decrement per hit"/"Min drop to apply (once the level has fallen this far toward 0...)" instead
+  — wording only, `meetsDirectionalThreshold`'s actual comparison and the stored `minLevelToApply`
+  number are untouched. "Decay per turn" is relabeled too, but keyed off `restingLevel` (drifts
+  up/down toward Resting level) rather than `hitDirection` — decay's direction was already
+  independent of Hit direction (see the field's own tooltip: "regardless of Hit direction"), so
+  tying its label to Hit direction would've been wrong; a tracker resting high with hits that
+  decrease it still decays back *up* toward that resting level. No new re-render wiring needed —
+  `hitDirection`/`restingLevel` were already outside `TRACKER_NO_RERENDER_FIELDS`, so changing
+  either already triggers the full re-render that recomputes these labels. 3 new render tests
+  (185 total).
+
 ## v39
 
 - **Flipped the settings-panel re-render rule from opt-in to opt-out** — the delegated field-change

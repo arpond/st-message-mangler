@@ -916,10 +916,11 @@ test('resolveLlmRatingUpdate: restingLevel high + decrease direction erodes on a
     assert.deepEqual(resolveLlmRatingUpdate(0.3, false, 7, trigger), { level: 0, locked: true });
 });
 
-test('defaultRule returns an empty AND-gate with no text', () => {
+test('defaultRule returns an empty AND-gate with no text and no steps', () => {
     const rule = defaultRule();
     assert.deepEqual(rule.conditions, []);
     assert.equal(rule.text, '');
+    assert.deepEqual(rule.steps, []);
     assert.match(rule.id, /^rule_/);
 });
 
@@ -984,6 +985,37 @@ test('resolveRuleOutput: hitDirection mirroring applies per-condition, using tha
     assert.deepEqual(resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById), { active: true, text: 'eroded' });
 });
 
+test('resolveRuleOutput (scaleMode=steps): matched rule resolves its own step ladder against level, not its flat text', () => {
+    const trackerById = new Map([['a', { ...defaultTrackerShape() }]]);
+    const resolvedLevels = new Map([['a', { level: 0.9 }]]);
+    const rules = [{
+        conditions: [{ trackerId: 'a', minLevel: 0.5 }],
+        text: 'ignored in steps mode',
+        steps: [{ threshold: 0, text: 'mild' }, { threshold: 0.8, text: 'intense' }],
+    }];
+    const result = resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById, 0.9, 'steps');
+    assert.deepEqual(result, { active: true, text: 'intense' });
+});
+
+test('resolveRuleOutput (scaleMode=steps, stack): each matching rule resolves its own ladder before joining', () => {
+    const trackerById = new Map([['a', { ...defaultTrackerShape() }], ['b', { ...defaultTrackerShape() }]]);
+    const resolvedLevels = new Map([['a', { level: 0.9 }], ['b', { level: 0.9 }]]);
+    const rules = [
+        { conditions: [{ trackerId: 'a', minLevel: 0.5 }], steps: [{ threshold: 0, text: 'fear-low' }, { threshold: 0.5, text: 'fear-high' }], text: '' },
+        { conditions: [{ trackerId: 'b', minLevel: 0.5 }], steps: [{ threshold: 0.5, text: 'compulsion-high' }], text: '' },
+    ];
+    const result = resolveRuleOutput(rules, 'stack', resolvedLevels, trackerById, 0.9, 'steps');
+    assert.equal(result.active, true);
+    assert.equal(result.text, 'fear-high\n\ncompulsion-high');
+});
+
+test('resolveRuleOutput defaults to freeform scaleMode when not passed (back-compat)', () => {
+    const trackerById = new Map([['a', { ...defaultTrackerShape() }]]);
+    const resolvedLevels = new Map([['a', { level: 0.9 }]]);
+    const rules = [{ conditions: [{ trackerId: 'a', minLevel: 0.5 }], text: 'flat text', steps: [{ threshold: 0, text: 'should be ignored' }] }];
+    assert.deepEqual(resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById), { active: true, text: 'flat text' });
+});
+
 test('sanitizeRules resets a non-finite condition minLevel to 0.5 and warns', () => {
     const rules = [{ conditions: [{ trackerId: 'a', minLevel: 'bad' }], text: '' }];
     const warnings = [];
@@ -1002,4 +1034,17 @@ test('sanitizeRules coerces a non-string rule text to an empty string', () => {
     const rules = [{ conditions: [], text: null }];
     sanitizeRules(rules, () => {});
     assert.equal(rules[0].text, '');
+});
+
+test('sanitizeRules defaults a missing steps array and sanitizes its thresholds like scaleSteps', () => {
+    const rules = [{ conditions: [], text: '' }];
+    sanitizeRules(rules, () => {});
+    assert.deepEqual(rules[0].steps, []);
+
+    const withBadStep = [{ conditions: [], text: '', steps: [{ threshold: 'bad', text: 5 }] }];
+    const warnings = [];
+    sanitizeRules(withBadStep, (...args) => warnings.push(args));
+    assert.equal(withBadStep[0].steps[0].threshold, 0);
+    assert.equal(withBadStep[0].steps[0].text, '');
+    assert.equal(warnings.length, 1);
 });

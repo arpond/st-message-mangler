@@ -278,7 +278,7 @@ export async function applyEffects(originalText, message, settings, source, isCo
         // when present — see resolveRuleOutput. level/trend for placeholder substitution always
         // stay the primary tracker's, regardless of which rule (if any) matched.
         const ruleOutput = effect.rules.length > 0
-            ? resolveRuleOutput(effect.rules, effect.ruleMode, resolvedTrackers, trackerById)
+            ? resolveRuleOutput(effect.rules, effect.ruleMode, resolvedTrackers, trackerById, level, effect.llmRewrite.scaleMode)
             : null;
         const active = ruleOutput
             ? ruleOutput.active
