@@ -42,7 +42,10 @@ const EFFECT_NO_RERENDER_FIELDS = {
         'awarenessCue', 'promptLevelCap', 'regex.pattern', 'regex.flags', 'regex.replacement',
         'drunk.intensity', 'llmRewrite.promptTemplate', 'llmRewrite.sceneLookback', 'llmRewrite.maxResponseTokens',
     ]),
-    patterns: [/^llmRewrite\.scaleSteps\.\d+\.(threshold|text)$/, /^rules\.\d+\.text$/],
+    patterns: [
+        /^llmRewrite\.scaleSteps\.\d+\.(threshold|text)$/, /^rules\.\d+\.text$/,
+        /^rules\.\d+\.steps\.\d+\.(threshold|text)$/,
+    ],
 };
 function isOptedOutField(fieldPath, { exact, patterns }) {
     return exact.has(fieldPath) || patterns.some(re => re.test(fieldPath));
