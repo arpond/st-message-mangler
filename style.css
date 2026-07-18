@@ -104,6 +104,10 @@
     flex: 1;
 }
 
+.st-message-mangler-settings .st_mangler_scale_gen_count {
+    flex: 0 0 5em;
+}
+
 .st-message-mangler-settings .st_mangler_scale_gen {
     display: flex;
     align-items: center;
