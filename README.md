@@ -112,7 +112,7 @@ Open the **Message Mangler** drawer in the Extensions settings panel.
 | **Regex replace** | Deterministic find/replace (JS regex, `$1` backreferences work). |
 | **Drunk mangle** | Algorithmic character-level mangling (random letter doubling + trailing elongation), scaled by intensity. |
 | **LLM rewrite** | Sends the message to your currently-connected model with a custom prompt template and replaces it with the response. Needed for transforms regex can't express — e.g. "let a character's buried religious conviction creep into their dialogue" — since that's a rewrite of meaning, not a substitution. |
-| **No transform (detect/track only)** | Doesn't touch the message at all — use it when you only want the trigger/detection engine (keyword or LLM evidence → level → escalation/decay) to drive an awareness cue or the floating status panel, without mangling any text. The Target field is hidden since there's nothing to apply a transform to. |
+| **No transform (awareness only)** | Doesn't touch the message at all — use it when you only want the paired Tracker's detection (keyword or LLM evidence → level → escalation/decay) to drive an awareness cue or the floating status panel, without mangling any text. The Target field is hidden since there's nothing to apply a transform to. |
 
 **LLM rewrite** prompt templates support these placeholders: `{{original}}` (the text so far in
 the pipeline — what this effect actually rewrites, which may already reflect earlier effects),

@@ -97,7 +97,7 @@ export function renderEffectRow(effect, allTrackers = []) {
                         <option value="regex" ${effect.type === 'regex' ? 'selected' : ''}>Regex replace</option>
                         <option value="drunk" ${effect.type === 'drunk' ? 'selected' : ''}>Drunk mangle</option>
                         <option value="llm-rewrite" ${effect.type === 'llm-rewrite' ? 'selected' : ''}>LLM rewrite</option>
-                        <option value="none" ${effect.type === 'none' ? 'selected' : ''}>No transform (detect/track only)</option>
+                        <option value="none" ${effect.type === 'none' ? 'selected' : ''}>No transform (awareness only)</option>
                     </select>
                 </div>
                 <div class="st_mangler_tab_strip">${tabStrip}</div>

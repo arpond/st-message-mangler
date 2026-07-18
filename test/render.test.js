@@ -90,8 +90,8 @@ test('renderTriggerPanel reflects the level/turnsActive/locked values passed in,
     assert.match(html, />yes</);
 });
 
-test('EFFECT_TYPE_LABELS includes a label for the "none" (track-only) type', () => {
-    assert.equal(EFFECT_TYPE_LABELS.none, 'Track only (no transform)');
+test('EFFECT_TYPE_LABELS includes a label for the "none" (awareness-only) type', () => {
+    assert.equal(EFFECT_TYPE_LABELS.none, 'Awareness only (no transform)');
 });
 
 test('renderTypeFields explains "none" rather than returning blank', () => {

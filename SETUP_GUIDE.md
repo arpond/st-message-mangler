@@ -120,7 +120,7 @@ everything else (keywords, decay, a prompt template) is identical in shape to th
 
 ## 3. Advanced: Faith (three interconnected trackers/effects)
 
-The full toolbox: LLM classification with magnitude scaling, a track-only effect that exists
+The full toolbox: LLM classification with magnitude scaling, an awareness-only effect that exists
 purely to drive an awareness cue, multi-dependency AND-gating across **trackers**, and
 `cumulative-lock` for a conversion that — once it happens — stays permanent until dispelled.
 Three separate tracker+effect pairs, each configured in turn, that only produce the full arc
@@ -130,7 +130,7 @@ together. Dependencies are configured on each *tracker*'s Dependency tab, refere
 ### A — "Faith seed" (tracks quiet doubt forming; no rewrite)
 
 1. **Add effect**, rename the pair to `Faith seed`, set the effect's type to **No transform
-   (detect/track only)** — this effect never changes any text; it exists purely to drive an
+   (awareness only)** — this effect never changes any text; it exists purely to drive an
    awareness cue off its tracker's level, for the other two pairs to build on. (The **Target**
    field disappears from the effect's Basics tab for this type — nothing to target.)
 2. **Effect → Basics** tab, **Live awareness cue**:
@@ -183,7 +183,7 @@ together. Dependencies are configured on each *tracker*'s Dependency tab, refere
 ### C — "Public devotion" (permanent conversion, gated on both A's and B's trackers)
 
 8. **Add effect**, rename the pair to `Public devotion`, set the effect's type to **No transform
-   (detect/track only)** — this one only exists to lock in and announce the conversion; the actual
+   (awareness only)** — this one only exists to lock in and announce the conversion; the actual
    dialogue rewriting is already `Doubt cracks`' job.
 9. **Tracker → Dependency** tab: click **Add dependency** twice — `Faith seed` at Min level `0.6`,
    and `Doubt cracks` at Min level `0.6` (both trackers, not effects). **Both** must be satisfied

@@ -4,6 +4,13 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v38
+
+- **Renamed the "Track only" effect type to "Awareness only"** — the label was left over from
+  before the Tracker/Effect split; a Tracker does the actual detection/tracking now, so an
+  Effect of this type only ever drives an awareness cue/status badge, never "tracks" anything
+  itself. `type: 'none'` unchanged, no migration needed — label/copy only.
+
 ## v36
 
 - **Rule-composition layer for Effects (phase 2 of the Tracker/Effect split)** — an optional new
