@@ -12,7 +12,8 @@ import {
     resolveDetectionLevelUpdate, buildChainPreservationNote, wouldCreateCycle, matchesBoundCharacter,
     resolveChatActiveState, resolveBindableCharacters, restingLevelValue, meetsDirectionalThreshold,
     resolveHitLevel, migrateEffectDependency, resolveLlmMagnitudeScale, resolveEffectTracker,
-    defaultRule, resolveRuleOutput, sanitizeRules,
+    defaultRule, resolveRuleOutput, sanitizeRules, buildTrackerAutoCueTemplate,
+    resolveGlobalAwarenessHit, resolveGlobalAwarenessDecay,
 } from '../lib/pure.js';
 
 test('clamp01 clamps to [0, 1]', () => {
@@ -26,6 +27,7 @@ test('defaultTrackerShape returns the always/keyword baseline shape', () => {
     assert.equal(tracker.mode, 'always');
     assert.equal(tracker.detector, 'keyword');
     assert.equal(tracker.detectSource, 'both');
+    assert.equal(tracker.autoAwarenessCue, false);
 });
 
 test('defaultTracker adds a unique id on top of defaultTrackerShape', () => {
@@ -102,6 +104,16 @@ test('DEFAULT_SETTINGS starts with no trackers/effects and debug off', () => {
     assert.deepEqual(DEFAULT_SETTINGS.trackers, []);
     assert.deepEqual(DEFAULT_SETTINGS.effects, []);
     assert.equal(DEFAULT_SETTINGS.debug, false);
+});
+
+test('DEFAULT_SETTINGS.globalAwareness is enabled by default (deliberate exception to opt-in-everything) with a working step ladder', () => {
+    const ga = DEFAULT_SETTINGS.globalAwareness;
+    assert.equal(ga.enabled, true);
+    assert.equal(typeof ga.incrementPerHit, 'number');
+    assert.equal(typeof ga.decayPerTurn, 'number');
+    assert.ok(Array.isArray(ga.steps) && ga.steps.length > 0);
+    // level 0 (idle chat, no configured trackers) must resolve to no cue at all.
+    assert.equal(resolveScaleStep(ga.steps, 0), '');
 });
 
 test('migrateEffectsToTrackers is a no-op once settings.trackers already exists', () => {
@@ -341,6 +353,92 @@ test('resolveAwarenessCue respects a custom cap', () => {
 test('resolveAwarenessCue substitutes {{trend}}, defaulting to steady', () => {
     assert.equal(resolveAwarenessCue('it is {{trend}}', 1), 'it is steady');
     assert.equal(resolveAwarenessCue('it is {{trend}}', 1, 0.99, 'escalating'), 'it is escalating');
+});
+
+test('resolveAwarenessCue resolves {{level:Label}}/{{level_pct:Label}}/{{trend:Label}} for a named tracker, independent of the primary {{level}}', () => {
+    const fear = { ...defaultTrackerShape(), id: 'fear_id', label: 'Fear' };
+    const trackerById = new Map([[fear.id, fear]]);
+    const resolvedTrackers = new Map([[fear.id, { level: 0.75, trend: 'escalating' }]]);
+    const result = resolveAwarenessCue(
+        'primary={{level}} fear={{level:Fear}} fear_pct={{level_pct:Fear}}% fear_trend={{trend:Fear}}',
+        0.2, 0.99, 'steady', resolvedTrackers, trackerById,
+    );
+    assert.equal(result, 'primary=0.20 fear=0.75 fear_pct=75% fear_trend=escalating');
+});
+
+test('resolveAwarenessCue caps a named tracker\'s level the same way as the primary', () => {
+    const fear = { ...defaultTrackerShape(), id: 'fear_id', label: 'Fear' };
+    const trackerById = new Map([[fear.id, fear]]);
+    const resolvedTrackers = new Map([[fear.id, { level: 1, trend: 'steady' }]]);
+    const result = resolveAwarenessCue('{{level:Fear}}', 0, 0.9, 'steady', resolvedTrackers, trackerById);
+    assert.equal(result, '0.90');
+});
+
+test('resolveAwarenessCue leaves an unmatched tracker label untouched rather than blanking it', () => {
+    const trackerById = new Map();
+    const resolvedTrackers = new Map();
+    const result = resolveAwarenessCue('fear={{level:Fear}}', 0.5, 0.99, 'steady', resolvedTrackers, trackerById);
+    assert.equal(result, 'fear={{level:Fear}}');
+});
+
+test('resolveAwarenessCue skips named-tracker resolution entirely when resolvedTrackers/trackerById are omitted (back-compat)', () => {
+    const result = resolveAwarenessCue('fear={{level:Fear}} primary={{level}}', 0.5);
+    assert.equal(result, 'fear={{level:Fear}} primary=0.50');
+});
+
+test('buildTrackerAutoCueTemplate resolves through resolveAwarenessCue to "<label> ({{user}}): NN% (<trend>)"', () => {
+    const tracker = { ...defaultTrackerShape(), label: 'Fear' };
+    const template = buildTrackerAutoCueTemplate(tracker);
+    const resolved = resolveAwarenessCue(template, 0.62, 0.99, 'escalating');
+    // {{user}} is deliberately left unresolved here — resolveAwarenessCue only substitutes its
+    // own placeholders; SillyTavern itself substitutes {{user}} later (getExtensionPrompt runs
+    // substituteParams on every extension prompt before it reaches the model).
+    assert.equal(resolved, 'Fear ({{user}}): 62% (escalating)');
+});
+
+test('buildTrackerAutoCueTemplate falls back to the tracker id when unlabeled', () => {
+    const tracker = { ...defaultTrackerShape(), id: 'tracker_abc123', label: '' };
+    const resolved = resolveAwarenessCue(buildTrackerAutoCueTemplate(tracker), 0.1, 0.99, 'steady');
+    assert.equal(resolved, 'tracker_abc123 ({{user}}): 10% (steady)');
+});
+
+test('buildTrackerAutoCueTemplate ignores llmCondition/keywords when autoAwarenessCueDescribeCondition is off', () => {
+    const tracker = { ...defaultTrackerShape(), label: 'Fear', detector: 'llm', llmCondition: 'the speaker is terrified' };
+    assert.equal(buildTrackerAutoCueTemplate(tracker), 'Fear ({{user}}): {{level_pct}}% ({{trend}})');
+});
+
+test('buildTrackerAutoCueTemplate appends llmCondition when describing condition on an LLM-detector tracker', () => {
+    const tracker = {
+        ...defaultTrackerShape(), label: 'Fear', detector: 'llm',
+        llmCondition: 'the speaker is terrified', autoAwarenessCueDescribeCondition: true,
+    };
+    assert.equal(buildTrackerAutoCueTemplate(tracker), 'Fear ({{user}}): {{level_pct}}% ({{trend}}) — the speaker is terrified');
+});
+
+test('buildTrackerAutoCueTemplate appends a labeled keyword list when describing condition on a keyword-detector tracker', () => {
+    const tracker = {
+        ...defaultTrackerShape(), label: 'Fear', detector: 'keyword',
+        keywords: 'stabbed, wounded', autoAwarenessCueDescribeCondition: true,
+    };
+    assert.equal(buildTrackerAutoCueTemplate(tracker), 'Fear ({{user}}): {{level_pct}}% ({{trend}}) — keywords: stabbed, wounded');
+});
+
+test('buildTrackerAutoCueTemplate falls back to the base cue (no dangling separator) when describing condition but the relevant field is empty', () => {
+    const tracker = { ...defaultTrackerShape(), label: 'Fear', detector: 'llm', llmCondition: '', autoAwarenessCueDescribeCondition: true };
+    assert.equal(buildTrackerAutoCueTemplate(tracker), 'Fear ({{user}}): {{level_pct}}% ({{trend}})');
+});
+
+test('buildTrackerAutoCueTemplate uses autoAwarenessCueOverride verbatim when set, ignoring label/describeCondition entirely', () => {
+    const tracker = {
+        ...defaultTrackerShape(), label: 'Fear', detector: 'llm', llmCondition: 'the speaker is terrified',
+        autoAwarenessCueDescribeCondition: true, autoAwarenessCueOverride: '{{user}}\'s heart pounds — {{level_pct}}%.',
+    };
+    assert.equal(buildTrackerAutoCueTemplate(tracker), '{{user}}\'s heart pounds — {{level_pct}}%.');
+});
+
+test('buildTrackerAutoCueTemplate falls back to the auto-generated line when autoAwarenessCueOverride is blank', () => {
+    const tracker = { ...defaultTrackerShape(), label: 'Fear', autoAwarenessCueOverride: '' };
+    assert.equal(buildTrackerAutoCueTemplate(tracker), 'Fear ({{user}}): {{level_pct}}% ({{trend}})');
 });
 
 test('resolveLevelTrend detects escalating and de-escalating beyond the epsilon', () => {
@@ -621,13 +719,13 @@ test('extractRating clamps an out-of-range value to [0, 10] and returns null whe
 
 test('resolveLlmRatingUpdate: absolute mode sets level directly from the rating', () => {
     const trigger = { ...defaultTrackerShape(), llmIntegrationMode: 'absolute' };
-    assert.deepEqual(resolveLlmRatingUpdate(0.2, false, 7, trigger), { level: 0.7, locked: false });
+    assert.deepEqual(resolveLlmRatingUpdate(0.2, false, 7, trigger), { level: 0.7, locked: false, hit: false });
 });
 
 test('resolveLlmRatingUpdate: cumulative mode increments on a hit, decays otherwise', () => {
     const trigger = { ...defaultTrackerShape(), llmIntegrationMode: 'cumulative', llmHitThreshold: 5, incrementPerHit: 0.3, decayPerTurn: 0.05 };
-    assert.deepEqual(resolveLlmRatingUpdate(0.2, false, 7, trigger), { level: 0.5, locked: false });
-    assert.deepEqual(resolveLlmRatingUpdate(0.2, false, 2, trigger), { level: 0.2 - 0.05, locked: false });
+    assert.deepEqual(resolveLlmRatingUpdate(0.2, false, 7, trigger), { level: 0.5, locked: false, hit: true });
+    assert.deepEqual(resolveLlmRatingUpdate(0.2, false, 2, trigger), { level: 0.2 - 0.05, locked: false, hit: false });
 });
 
 test('resolveLlmRatingUpdate: cumulative-lock locks once level crosses lockThreshold', () => {
@@ -635,17 +733,17 @@ test('resolveLlmRatingUpdate: cumulative-lock locks once level crosses lockThres
         ...defaultTrackerShape(), llmIntegrationMode: 'cumulative-lock',
         llmHitThreshold: 5, incrementPerHit: 0.3, decayPerTurn: 0.05, lockThreshold: 0.8,
     };
-    assert.deepEqual(resolveLlmRatingUpdate(0.6, false, 7, trigger), { level: 0.6 + 0.3, locked: true });
+    assert.deepEqual(resolveLlmRatingUpdate(0.6, false, 7, trigger), { level: 0.6 + 0.3, locked: true, hit: true });
     // Already-locked stays locked even on a non-hit (caller is expected to skip calling this
     // at all once locked, per the doc comment — this just verifies the math doesn't un-lock).
-    assert.deepEqual(resolveLlmRatingUpdate(0.9, true, 1, trigger), { level: 0.85, locked: true });
+    assert.deepEqual(resolveLlmRatingUpdate(0.9, true, 1, trigger), { level: 0.85, locked: true, hit: false });
 });
 
 test('resolveDetectionLevelUpdate: dispel keyword forces level/turnsActive to 0', () => {
     const trigger = { ...defaultTrackerShape(), dispelKeywords: 'stop' };
     assert.deepEqual(
         resolveDetectionLevelUpdate(0.5, 3, 'please stop now', trigger),
-        { level: 0, turnsActive: 0, dispelled: true, autoDispelled: false },
+        { level: 0, turnsActive: 0, dispelled: true, autoDispelled: false, hit: false },
     );
 });
 
@@ -653,11 +751,11 @@ test('resolveDetectionLevelUpdate: keyword detector increments/decays like resol
     const trigger = { ...defaultTrackerShape(), detector: 'keyword', keywords: 'tree', incrementPerHit: 0.3, decayPerTurn: 0.05, minLevelToApply: 0.05 };
     assert.deepEqual(
         resolveDetectionLevelUpdate(0.2, 0, 'a tree grows here', trigger),
-        { level: 0.2 + 0.3, turnsActive: 1, dispelled: false, autoDispelled: false },
+        { level: 0.2 + 0.3, turnsActive: 1, dispelled: false, autoDispelled: false, hit: true },
     );
     assert.deepEqual(
         resolveDetectionLevelUpdate(0.2, 1, 'no match here', trigger),
-        { level: 0.2 - 0.05, turnsActive: 2, dispelled: false, autoDispelled: false },
+        { level: 0.2 - 0.05, turnsActive: 2, dispelled: false, autoDispelled: false, hit: false },
     );
 });
 
@@ -665,7 +763,7 @@ test('resolveDetectionLevelUpdate: llm detector leaves level unchanged but still
     const trigger = { ...defaultTrackerShape(), detector: 'llm', minLevelToApply: 0.05 };
     assert.deepEqual(
         resolveDetectionLevelUpdate(0.4, 2, 'anything', trigger),
-        { level: 0.4, turnsActive: 3, dispelled: false, autoDispelled: false },
+        { level: 0.4, turnsActive: 3, dispelled: false, autoDispelled: false, hit: false },
     );
 });
 
@@ -673,7 +771,7 @@ test('resolveDetectionLevelUpdate: inactive level resets turnsActive to 0', () =
     const trigger = { ...defaultTrackerShape(), detector: 'llm', minLevelToApply: 0.5 };
     assert.deepEqual(
         resolveDetectionLevelUpdate(0.2, 4, 'anything', trigger),
-        { level: 0.2, turnsActive: 0, dispelled: false, autoDispelled: false },
+        { level: 0.2, turnsActive: 0, dispelled: false, autoDispelled: false, hit: false },
     );
 });
 
@@ -681,8 +779,18 @@ test('resolveDetectionLevelUpdate: autoDispelled once turnsActive exceeds maxTur
     const trigger = { ...defaultTrackerShape(), detector: 'llm', minLevelToApply: 0.05, maxTurnsActive: 3 };
     assert.deepEqual(
         resolveDetectionLevelUpdate(0.4, 3, 'anything', trigger),
-        { level: 0.4, turnsActive: 4, dispelled: false, autoDispelled: true },
+        { level: 0.4, turnsActive: 4, dispelled: false, autoDispelled: true, hit: false },
     );
+});
+
+test('resolveGlobalAwarenessHit bumps and clamps at 1', () => {
+    assert.equal(resolveGlobalAwarenessHit(0.5, 0.2), 0.7);
+    assert.equal(resolveGlobalAwarenessHit(0.95, 0.2), 1);
+});
+
+test('resolveGlobalAwarenessDecay drifts down and clamps at 0', () => {
+    assert.equal(resolveGlobalAwarenessDecay(0.5, 0.1), 0.4);
+    assert.equal(resolveGlobalAwarenessDecay(0.05, 0.1), 0);
 });
 
 test('buildChainPreservationNote is a no-op on the first effect in a chain', () => {
@@ -739,7 +847,7 @@ test('resolveDetectionLevelUpdate: unmet prerequisite treats a keyword hit as a 
     // normally — being blocked only suppresses the increment itself, not activity tracking.
     assert.deepEqual(
         resolveDetectionLevelUpdate(0.2, 0, 'a tree grows here', trigger, false),
-        { level: 0.2 - 0.05, turnsActive: 1, dispelled: false, autoDispelled: false },
+        { level: 0.2 - 0.05, turnsActive: 1, dispelled: false, autoDispelled: false, hit: false },
     );
 });
 
@@ -747,7 +855,7 @@ test('resolveLlmRatingUpdate: unmet prerequisite treats a cumulative hit as a no
     const trigger = { ...defaultTrackerShape(), llmIntegrationMode: 'cumulative', llmHitThreshold: 5, incrementPerHit: 0.3, decayPerTurn: 0.05 };
     assert.deepEqual(
         resolveLlmRatingUpdate(0.2, false, 7, trigger, false),
-        { level: 0.2 - 0.05, locked: false },
+        { level: 0.2 - 0.05, locked: false, hit: false },
     );
 });
 
@@ -755,7 +863,7 @@ test('resolveLlmRatingUpdate: unmet prerequisite freezes absolute mode instead o
     const trigger = { ...defaultTrackerShape(), llmIntegrationMode: 'absolute' };
     assert.deepEqual(
         resolveLlmRatingUpdate(0.4, false, 9, trigger, false),
-        { level: 0.4, locked: false },
+        { level: 0.4, locked: false, hit: false },
     );
 });
 
@@ -895,32 +1003,33 @@ test('resolveLlmRatingUpdate: magnitude scaling makes a near-threshold rating in
 
 test('resolveLlmRatingUpdate: magnitude scaling still decays at the flat rate when blocked by a dependency', () => {
     const trigger = { ...defaultTrackerShape(), llmIntegrationMode: 'cumulative', llmMagnitudeScaling: true, llmHitThreshold: 5, decayPerTurn: 0.1 };
-    assert.deepEqual(resolveLlmRatingUpdate(0.5, false, 9, trigger, false), { level: 0.5 - 0.1, locked: false });
+    assert.deepEqual(resolveLlmRatingUpdate(0.5, false, 9, trigger, false), { level: 0.5 - 0.1, locked: false, hit: false });
 });
 
 test('resolveDetectionLevelUpdate: restingLevel high dispels/no-hit-decays toward 1 instead of 0', () => {
     const trigger = { ...defaultTrackerShape(), dispelKeywords: 'stop', restingLevel: 'high', detector: 'keyword', keywords: 'never-matches', decayPerTurn: 0.05, minLevelToApply: 0.5, hitDirection: 'decrease' };
     assert.deepEqual(
         resolveDetectionLevelUpdate(0.5, 3, 'please stop now', trigger),
-        { level: 1, turnsActive: 0, dispelled: true, autoDispelled: false },
+        { level: 1, turnsActive: 0, dispelled: true, autoDispelled: false, hit: false },
     );
     assert.deepEqual(
         resolveDetectionLevelUpdate(0.8, 0, 'no match here', trigger),
-        { level: 0.8 + 0.05, turnsActive: 0, dispelled: false, autoDispelled: false },
+        { level: 0.8 + 0.05, turnsActive: 0, dispelled: false, autoDispelled: false, hit: false },
     );
 });
 
 test('resolveLlmRatingUpdate: restingLevel high + decrease direction erodes on a hit, locks via mirrored lockThreshold', () => {
     const trigger = { ...defaultTrackerShape(), llmIntegrationMode: 'cumulative-lock', restingLevel: 'high', hitDirection: 'decrease', llmHitThreshold: 5, incrementPerHit: 0.3, lockThreshold: 0.8 };
-    assert.deepEqual(resolveLlmRatingUpdate(0.9, false, 7, trigger), { level: 0.9 - 0.3, locked: false });
-    assert.deepEqual(resolveLlmRatingUpdate(0.3, false, 7, trigger), { level: 0, locked: true });
+    assert.deepEqual(resolveLlmRatingUpdate(0.9, false, 7, trigger), { level: 0.9 - 0.3, locked: false, hit: true });
+    assert.deepEqual(resolveLlmRatingUpdate(0.3, false, 7, trigger), { level: 0, locked: true, hit: true });
 });
 
-test('defaultRule returns an empty AND-gate with no text and no steps', () => {
+test('defaultRule returns an empty AND-gate with no text, steps, or awarenessCue', () => {
     const rule = defaultRule();
     assert.deepEqual(rule.conditions, []);
     assert.equal(rule.text, '');
     assert.deepEqual(rule.steps, []);
+    assert.equal(rule.awarenessCue, '');
     assert.match(rule.id, /^rule_/);
 });
 
@@ -935,7 +1044,7 @@ test('resolveRuleOutput (first-match): picks the first rule whose every conditio
         { conditions: [{ trackerId: 'a', minLevel: 0.5 }], text: 'a only' },
     ];
     const result = resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById);
-    assert.deepEqual(result, { active: true, text: 'a only' });
+    assert.deepEqual(result, { active: true, text: 'a only', cueText: '' });
 });
 
 test('resolveRuleOutput (first-match): a zero-condition rule matches vacuously as a fallback', () => {
@@ -945,14 +1054,14 @@ test('resolveRuleOutput (first-match): a zero-condition rule matches vacuously a
         { conditions: [{ trackerId: 'a', minLevel: 0.5 }], text: 'a active' },
         { conditions: [], text: 'otherwise' },
     ];
-    assert.deepEqual(resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById), { active: true, text: 'otherwise' });
+    assert.deepEqual(resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById), { active: true, text: 'otherwise', cueText: '' });
 });
 
 test('resolveRuleOutput (first-match): no rule matches -> inactive, empty text', () => {
     const trackerById = new Map([['a', { ...defaultTrackerShape() }]]);
     const resolvedLevels = new Map([['a', { level: 0 }]]);
     const rules = [{ conditions: [{ trackerId: 'a', minLevel: 0.5 }], text: 'a active' }];
-    assert.deepEqual(resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById), { active: false, text: '' });
+    assert.deepEqual(resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById), { active: false, text: '', cueText: '' });
 });
 
 test('resolveRuleOutput (stack): joins every matching rule\'s text, in order, and skips blank ones', () => {
@@ -975,14 +1084,14 @@ test('resolveRuleOutput: a condition referencing a deleted tracker is dropped, n
     const trackerById = new Map([['a', { ...defaultTrackerShape() }]]);
     const resolvedLevels = new Map([['a', { level: 0.9 }]]);
     const rules = [{ conditions: [{ trackerId: 'a', minLevel: 0.5 }, { trackerId: 'gone', minLevel: 0.9 }], text: 'matched' }];
-    assert.deepEqual(resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById), { active: true, text: 'matched' });
+    assert.deepEqual(resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById), { active: true, text: 'matched', cueText: '' });
 });
 
 test('resolveRuleOutput: hitDirection mirroring applies per-condition, using that condition\'s own tracker', () => {
     const trackerById = new Map([['a', { ...defaultTrackerShape(), hitDirection: 'decrease' }]]);
     const resolvedLevels = new Map([['a', { level: 0.1 }]]); // low level -> "met" for a decrease-direction 0.5 threshold
     const rules = [{ conditions: [{ trackerId: 'a', minLevel: 0.5 }], text: 'eroded' }];
-    assert.deepEqual(resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById), { active: true, text: 'eroded' });
+    assert.deepEqual(resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById), { active: true, text: 'eroded', cueText: '' });
 });
 
 test('resolveRuleOutput (scaleMode=steps): matched rule resolves its own step ladder against level, not its flat text', () => {
@@ -994,7 +1103,7 @@ test('resolveRuleOutput (scaleMode=steps): matched rule resolves its own step la
         steps: [{ threshold: 0, text: 'mild' }, { threshold: 0.8, text: 'intense' }],
     }];
     const result = resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById, 0.9, 'steps');
-    assert.deepEqual(result, { active: true, text: 'intense' });
+    assert.deepEqual(result, { active: true, text: 'intense', cueText: '' });
 });
 
 test('resolveRuleOutput (scaleMode=steps, stack): each matching rule resolves its own ladder before joining', () => {
@@ -1013,7 +1122,40 @@ test('resolveRuleOutput defaults to freeform scaleMode when not passed (back-com
     const trackerById = new Map([['a', { ...defaultTrackerShape() }]]);
     const resolvedLevels = new Map([['a', { level: 0.9 }]]);
     const rules = [{ conditions: [{ trackerId: 'a', minLevel: 0.5 }], text: 'flat text', steps: [{ threshold: 0, text: 'should be ignored' }] }];
-    assert.deepEqual(resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById), { active: true, text: 'flat text' });
+    assert.deepEqual(resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById), { active: true, text: 'flat text', cueText: '' });
+});
+
+test('resolveRuleOutput (first-match): matched rule\'s cueText is independent of its text/steps', () => {
+    const trackerById = new Map([['a', { ...defaultTrackerShape() }]]);
+    const resolvedLevels = new Map([['a', { level: 0.9 }]]);
+    const rules = [{
+        conditions: [{ trackerId: 'a', minLevel: 0.5 }],
+        text: 'scale instruction text',
+        awarenessCue: 'she notices the fear',
+    }];
+    const result = resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById);
+    assert.deepEqual(result, { active: true, text: 'scale instruction text', cueText: 'she notices the fear' });
+});
+
+test('resolveRuleOutput (stack): joins every matching rule\'s cueText, skipping blanks, same as text', () => {
+    const trackerById = new Map([['a', { ...defaultTrackerShape() }], ['b', { ...defaultTrackerShape() }]]);
+    const resolvedLevels = new Map([['a', { level: 0.9 }], ['b', { level: 0.9 }]]);
+    const rules = [
+        { conditions: [{ trackerId: 'a', minLevel: 0.5 }], text: '', awarenessCue: 'fear is active' },
+        { conditions: [{ trackerId: 'b', minLevel: 0.5 }], text: '', awarenessCue: '' },
+        { conditions: [{ trackerId: 'a', minLevel: 0.5 }, { trackerId: 'b', minLevel: 0.5 }], text: '', awarenessCue: 'both are active' },
+    ];
+    const result = resolveRuleOutput(rules, 'stack', resolvedLevels, trackerById);
+    assert.equal(result.active, true);
+    assert.equal(result.cueText, 'fear is active\n\nboth are active');
+});
+
+test('resolveRuleOutput: cueText defaults to empty string for a rule with no awarenessCue field', () => {
+    const trackerById = new Map([['a', { ...defaultTrackerShape() }]]);
+    const resolvedLevels = new Map([['a', { level: 0.9 }]]);
+    const rules = [{ conditions: [], text: 'matched' }];
+    const result = resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById);
+    assert.equal(result.cueText, '');
 });
 
 test('sanitizeRules resets a non-finite condition minLevel to 0.5 and warns', () => {
@@ -1034,6 +1176,12 @@ test('sanitizeRules coerces a non-string rule text to an empty string', () => {
     const rules = [{ conditions: [], text: null }];
     sanitizeRules(rules, () => {});
     assert.equal(rules[0].text, '');
+});
+
+test('sanitizeRules coerces a non-string rule awarenessCue to an empty string', () => {
+    const rules = [{ conditions: [], text: '', awarenessCue: 42 }];
+    sanitizeRules(rules, () => {});
+    assert.equal(rules[0].awarenessCue, '');
 });
 
 test('sanitizeRules defaults a missing steps array and sanitizes its thresholds like scaleSteps', () => {

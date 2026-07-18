@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { defaultEffect, defaultTracker, defaultTrackerShape, defaultRule } from '../lib/pure.js';
 import {
     infoIcon, field, renderRowIdentity, renderTriggerPanel, renderDependencyPanel, renderTypeFields, renderTestPanel,
-    renderTrackerTestPanel, renderTrackerPickerField, renderRulesPanel, EFFECT_TYPE_LABELS,
+    renderTrackerTestPanel, renderTrackerPickerField, renderRulesPanel, renderTrackerBasicsPanel, EFFECT_TYPE_LABELS,
 } from '../lib/render.js';
 
 test('infoIcon renders a title-bearing icon with the given text', () => {
@@ -115,6 +115,27 @@ test('renderTriggerPanel labels Decay per turn by restingLevel, independent of h
     assert.match(html2, /Decay per turn \(drifts down toward Resting level\)/);
 });
 
+test('renderTriggerPanel relabels Lock threshold\'s "once level reaches this" for hitDirection=decrease', () => {
+    const tracker = defaultTracker();
+    tracker.detector = 'llm';
+    tracker.llmIntegrationMode = 'cumulative-lock';
+    const increasing = renderTriggerPanel(tracker, 0, 0, false);
+    assert.match(increasing, /once level reaches this, it stops decaying permanently/);
+    assert.doesNotMatch(increasing, /once the level has fallen this far toward 0/);
+
+    tracker.hitDirection = 'decrease';
+    const decreasing = renderTriggerPanel(tracker, 0, 0, false);
+    assert.match(decreasing, /once the level has fallen this far toward 0, it stops drifting back permanently/);
+    assert.doesNotMatch(decreasing, /once level reaches this, it stops decaying permanently/);
+});
+
+test('renderTriggerPanel\'s cumulative-lock dropdown option notes it works either way Hit direction points', () => {
+    const tracker = defaultTracker();
+    tracker.detector = 'llm';
+    const html = renderTriggerPanel(tracker, 0, 0, false);
+    assert.match(html, /Cumulative, locks once triggered \(stops decaying back toward Resting level until dispelled — works the same whichever way Hit direction points\)/);
+});
+
 test('renderTriggerPanel reflects the level/turnsActive/locked values passed in, not internal state', () => {
     const tracker = defaultTrackerShape();
     const html = renderTriggerPanel(tracker, 0.42, 7, true);
@@ -178,6 +199,58 @@ test('renderTrackerTestPanel shows a note instead of the test button for an alwa
     const html = renderTrackerTestPanel(tracker);
     assert.doesNotMatch(html, /st_mangler_tracker_test_detect/);
     assert.match(html, /no detector to test/);
+});
+
+test('renderTrackerBasicsPanel hides the auto-cue checkbox for an "always" tracker', () => {
+    const tracker = defaultTracker(); // mode defaults to 'always'
+    const html = renderTrackerBasicsPanel(tracker);
+    assert.match(html, /data-field="autoAwarenessCue"/);
+    assert.match(html, /style="display: none;"[^>]*>\s*<input type="checkbox" class="st_mangler_field" data-field="autoAwarenessCue"/);
+});
+
+test('renderTrackerBasicsPanel shows the auto-cue checkbox, checked, for a progressive tracker with it enabled', () => {
+    const tracker = defaultTracker();
+    tracker.mode = 'progressive';
+    tracker.autoAwarenessCue = true;
+    const html = renderTrackerBasicsPanel(tracker);
+    assert.match(html, /style="display: flex;"[^>]*>\s*<input type="checkbox" class="st_mangler_field" data-field="autoAwarenessCue" checked/);
+});
+
+test('renderTrackerBasicsPanel hides "describe what triggers it" when autoAwarenessCue is off, even for a progressive tracker', () => {
+    const tracker = defaultTracker();
+    tracker.mode = 'progressive';
+    tracker.autoAwarenessCue = false;
+    const html = renderTrackerBasicsPanel(tracker);
+    assert.match(html, /data-field="autoAwarenessCueDescribeCondition"/);
+    assert.match(html, /style="display: none;[^"]*"[^>]*>\s*<input type="checkbox" class="st_mangler_field" data-field="autoAwarenessCueDescribeCondition"/);
+});
+
+test('renderTrackerBasicsPanel shows "describe what triggers it", checked, once autoAwarenessCue is also on', () => {
+    const tracker = defaultTracker();
+    tracker.mode = 'progressive';
+    tracker.autoAwarenessCue = true;
+    tracker.autoAwarenessCueDescribeCondition = true;
+    const html = renderTrackerBasicsPanel(tracker);
+    assert.match(html, /style="display: flex;[^"]*"[^>]*>\s*<input type="checkbox" class="st_mangler_field" data-field="autoAwarenessCueDescribeCondition" checked/);
+});
+
+test('renderTrackerBasicsPanel hides the Custom cue text field when autoAwarenessCue is off', () => {
+    const tracker = defaultTracker();
+    tracker.mode = 'progressive';
+    tracker.autoAwarenessCue = false;
+    const html = renderTrackerBasicsPanel(tracker);
+    assert.match(html, /data-field="autoAwarenessCueOverride"/);
+    assert.match(html, /style="display: none;[^"]*"[^>]*>\s*Custom cue text/);
+});
+
+test('renderTrackerBasicsPanel shows the Custom cue text field, with its value, once autoAwarenessCue is on', () => {
+    const tracker = defaultTracker();
+    tracker.mode = 'progressive';
+    tracker.autoAwarenessCue = true;
+    tracker.autoAwarenessCueOverride = 'A custom cue';
+    const html = renderTrackerBasicsPanel(tracker);
+    assert.match(html, /style="display: block;[^"]*"[^>]*>\s*Custom cue text/);
+    assert.match(html, /data-field="autoAwarenessCueOverride"[^>]*>A custom cue</);
 });
 
 test('renderTrackerPickerField marks the effect\'s current trackerId as selected', () => {
@@ -307,17 +380,33 @@ test('renderRulesPanel hides rule instruction text for a "none" effect, since th
     effect.rules = [rule];
     const html = renderRulesPanel(effect, []);
     assert.doesNotMatch(html, /data-field="rules\.0\.text"/);
-    assert.doesNotMatch(html, /Instruction text/);
-    assert.doesNotMatch(html, /Step ladder/);
+    assert.doesNotMatch(html, /data-field="rules\.0\.steps\.\d+\.text"/);
+    assert.doesNotMatch(html, />\s*Instruction text</);
+    assert.doesNotMatch(html, />\s*Step ladder</);
     assert.match(html, /this rule's conditions still gate its activation/);
     // Conditions themselves still render — gating is the whole point for a "none" effect.
     assert.match(html, /data-field="rules\.0\.conditions\.0\.trackerId"/);
+    // The new per-rule Awareness cue field, however, is universal and still renders.
+    assert.match(html, /data-field="rules\.0\.awarenessCue"/);
 });
 
 test('renderRulesPanel hides rule instruction text for regex/drunk effects too, not just "none"', () => {
     const effect = defaultEffect('regex');
     effect.rules = [defaultRule()];
     const html = renderRulesPanel(effect, []);
-    assert.doesNotMatch(html, /Instruction text/);
+    assert.doesNotMatch(html, />\s*Instruction text</);
     assert.match(html, /this rule's conditions still gate its activation/);
+});
+
+test('renderRulesPanel renders the per-rule Awareness cue field for every effect type, with the rule\'s own value', () => {
+    for (const type of ['regex', 'drunk', 'llm-rewrite', 'none']) {
+        const effect = defaultEffect(type);
+        const rule = defaultRule();
+        rule.awarenessCue = 'she notices the fear';
+        effect.rules = [rule];
+        const html = renderRulesPanel(effect, []);
+        assert.match(html, /Awareness cue/, `expected Awareness cue field for type=${type}`);
+        assert.match(html, new RegExp(`data-field="rules\\.0\\.awarenessCue"`), `expected field path for type=${type}`);
+        assert.match(html, /she notices the fear/, `expected rule's own cue text for type=${type}`);
+    }
 });

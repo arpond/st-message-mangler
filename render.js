@@ -29,7 +29,7 @@ export function renderTrackerRow(tracker, allTrackers = [tracker]) {
     return `
         <div class="st_mangler_tracker" data-tracker-id="${tracker.id}">
             <div class="flex-container alignItemsCenter st_mangler_effect_header">
-                ${renderRowIdentity('st_mangler_tracker_toggle', expanded, tracker.enabled, tracker.label, 'Tracker label')}
+                ${renderRowIdentity('st_mangler_tracker_toggle', expanded, tracker.enabled, tracker.label, 'Tracker label — also how this tracker is referenced in a cue macro, e.g. {{level:' + (tracker.label || '...') + '}}')}
                 <span class="st_mangler_effect_summary_type">${tracker.mode === 'progressive' ? `Progressive (${tracker.detector})` : 'Always'}</span>
                 ${dependencyState ? `<i class="fa-solid fa-triangle-exclamation st_mangler_dependency_warning" title="${escapeHtmlForDisplay(dependencyState.reason)}"></i>` : ''}
                 ${trackerStatusBadgeHtml(tracker)}
@@ -118,7 +118,7 @@ export function renderEffectRow(effect, allTrackers = []) {
                         </select>
                     </label>
                     <label>
-                        Live awareness cue (optional)${infoIcon('Injected into the prompt only while this effect is active, so the character reacts to this specific moment (independent of any static World Info entry). Supports {{level}} / {{level_pct}} / {{trend}} (one of "escalating", "de-escalating", or "steady" — how the level changed since last turn, an easier signal for the model than a raw number or text diff).')}
+                        Live awareness cue (optional)${infoIcon('Injected into the prompt only while this effect is active, so the character reacts to this specific moment (independent of any static World Info entry). Supports {{level}} / {{level_pct}} / {{trend}} (one of "escalating", "de-escalating", or "steady" — how the level changed since last turn, an easier signal for the model than a raw number or text diff) for this effect\'s own primary tracker (chosen above). To also reference a DIFFERENT tracker\'s level/level_pct/trend — e.g. from a Rules-tab condition — use {{level:TrackerLabel}} / {{level_pct:TrackerLabel}} / {{trend:TrackerLabel}}, where TrackerLabel is that tracker\'s own label (exact match, case-sensitive) from the Trackers list above. A label that matches nothing is left as literal text rather than silently disappearing, so a typo is visible. Not previewed by the Test panel below — only the bare {{level}}/{{level_pct}}/{{trend}} are.')}
                         ${field('textarea', 'awarenessCue', effect.awarenessCue, 'rows="2" placeholder="e.g. [System: the compulsion is currently at {{level_pct}}% — let it visibly affect your dialogue.]"')}
                     </label>
                     <label>

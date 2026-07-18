@@ -6,6 +6,54 @@ successive rounds of development.
 
 ## v40
 
+- **Global "character awareness" meta-value** — a new, single, chat-scoped value that isn't tied
+  to any one Tracker: it rises whenever *any* configured Tracker registers a detection hit,
+  aggregated across all of them, and drives an overarching instruction as it climbs (default step
+  ladder: "hasn't consciously registered anything" → "beginning to notice patterns" → "can address
+  it directly"). Deliberately **on by default** — the one intentional exception to this extension's
+  usual opt-in-everything convention, justified because it's inert with no trackers configured
+  (`steps[0].text === ''` at level 0, so an idle install never injects anything). New
+  `settings.globalAwareness` (`enabled`, `incrementPerHit`, `decayPerTurn`, `promptLevelCap`,
+  `steps` — same threshold/text shape as `llmRewrite.scaleSteps`, reusing the existing
+  `renderScaleSteps` editor as-is) and a new **Character awareness** section on the main settings
+  panel, above the Trackers list.
+  - Real complication surfaced during design: keyword hits and LLM hits resolve on fundamentally
+    different timelines within one `applyEffects` call — keyword hits are known synchronously in
+    Phase A; LLM hits resolve later via `runBatchedLlmDetectors`/`applyLlmRating`, sometimes *after*
+    `applyEffects` has already returned (fire-and-forget). Rather than forcing a single sync point,
+    keyword hits bump the value immediately in Phase A, capped at one increment per message (the
+    first hitting tracker bumps it; further keyword hits the same message don't compound), and
+    decay is applied exactly once per message, gated on "did any keyword tracker hit" (mirrors
+    `resolveHitLevel`'s existing hit-XOR-decay shape); LLM hits are aggregated per batched-detector
+    run and bump independently, capped the same way (once per batch, not per hitting tracker) —
+    becoming visible starting the *next* message, the same "last-known level" lag LLM-detector
+    trackers already have for their own cues today, not a new inconsistency. **Follow-up same
+    session**: originally each hitting tracker compounded its own increment (so N simultaneous
+    hits = N× the bump); reworked to cap at one increment per message/batch after a user question
+    about whether it was capped — no configurable cap value, just a flat "first hit counts, rest
+    don't" gate on each side.
+  - `resolveDetectionLevelUpdate`/`resolveLlmRatingUpdate` (`lib/pure.js`) both gained a `hit`
+    field on their return objects (previously computed as a local var and discarded) — purely
+    additive, existing destructuring callers unaffected. New `resolveGlobalAwarenessHit`/
+    `resolveGlobalAwarenessDecay` (simple clamped +/-, deliberately simpler than a Tracker's own
+    increment/decay — no direction, no lock, no jump behavior). `updateAndGetTrackerLevel`
+    (`pipeline.js`) now returns `{ level, hit }` instead of a bare number (single call site
+    updated). `applyLlmRating` (`lib/llmClient.js`) now returns `{ level, hit }` too (previously a
+    bare number, unused by its one caller); `runBatchedLlmDetectors` aggregates `hit` across every
+    tracker in its batch and bumps global awareness at most once, gained an optional
+    `globalAwareness` param threaded from `pipeline.js`'s two call sites.
+  - Scoping: only `detector: 'keyword'` trackers and `detector: 'llm'` trackers in
+    `cumulative`/`cumulative-lock` mode have a "hit" concept at all — `llmIntegrationMode:
+    'absolute'` trackers (level swings freely to match the latest rating, no threshold-crossing)
+    and `'always'`-mode trackers (no detector) never contribute. Documented, not silently swallowed.
+  - Cleared on chat switch (`index.js`), extension disable, and its own Enabled checkbox toggling
+    off (`settingsUI.js`) — same `extension_prompts`-is-a-shared-map reasoning as every other cue
+    mechanism in this extension.
+  - 3 new unit tests, plus existing `resolveDetectionLevelUpdate`/`resolveLlmRatingUpdate` tests
+    extended to cover the new `hit` field (213 total). Not yet verified in a real chat this
+    session — the keyword/LLM timing split in particular needs a live multi-tracker chat to
+    confirm end to end.
+
 - **Per-rule step ladders — Rules and Structured steps compose instead of one replacing the
   other** — a rule (Rules tab) can now carry its own `steps: [{threshold, text}]` ladder, used
   instead of its flat instruction text when the effect's Scaling (Transform tab) is set to
@@ -70,6 +118,136 @@ successive rounds of development.
   `hitDirection`/`restingLevel` were already outside `TRACKER_NO_RERENDER_FIELDS`, so changing
   either already triggers the full re-render that recomputes these labels. 3 new render tests
   (185 total).
+- **Widened the step-ladder "Generate" count input** — flexbox could shrink the number input below
+  its inline `max-width: 4em` with nothing floored underneath it, so the generate count wasn't
+  visible at all. Set to `max-width`/`min-width: 5em` plus a matching `flex: 0 0 5em` in
+  `style.css` (mirroring the existing `.st_mangler_scale_step input[type="number"]` rule) so
+  flexbox can't shrink it past that regardless of surrounding space.
+- **Fixed focus loss when typing in a rule's step ladder fields** — `rules.<i>.steps.<j>.
+  (threshold|text)` weren't in `EFFECT_NO_RERENDER_FIELDS`' opt-out patterns (`settingsUI.js`), so
+  every keystroke triggered a full effect-list re-render, destroying and recreating the input
+  mid-type. The older flat `rules.<i>.text` and effect-level `scaleSteps` fields were already
+  covered; the new per-rule step ladder just wasn't added to the pattern list when it shipped.
+- **Per-rule awareness cue text** — Effect Rules can gate an effect on a *combination* of trackers
+  (e.g. Tracker A AND Tracker B, or A-only, or B-only), and for `llm-rewrite` effects a matched
+  rule already supplies its own `{{scale_instruction}}`. The awareness cue had no equivalent: it
+  was always the one Basics-tab template regardless of which rule matched, so a character had no
+  way to react differently to "only A", "only B", or "both A and B" active — exactly the
+  distinction Rules exists to express, just not reflected in the cue. Each rule now has its own
+  optional **Awareness cue** field (`rules.<i>.awarenessCue`, `lib/pure.js`'s `defaultRule`),
+  separate from the existing Instruction text/Step ladder (which stay `llm-rewrite`-only, since
+  they drive `{{scale_instruction}}`) — this new field is shown for **every** effect type,
+  including `none` (awareness-only effects are exactly the case this matters most for). When a
+  rule matches, its own cue text entirely replaces the effect's Basics-tab `awarenessCue` for that
+  call, same `{{level}}`/`{{level_pct}}`/`{{trend}}` placeholders (still substituted from the
+  effect's primary tracker, unchanged) and the same first-match/stack resolution
+  `{{scale_instruction}}` already uses (`resolveRuleOutput` now returns `cueText` alongside
+  `text`, resolved from the matched rule(s) independently — a different downstream consumer than
+  `text`/`steps`, so no "two placeholders fighting for one slot" risk). No rules configured → the
+  effect's own `awarenessCue` is used exactly as before, fully backward compatible.
+  `updateAwarenessCue` (`pipeline.js`) gained an optional `ruleCue` param (`null` = fall back to
+  `effect.awarenessCue`) alongside the existing `ruleText`. `rules.<i>.awarenessCue` was added to
+  `EFFECT_NO_RERENDER_FIELDS`' opt-out patterns up front this time, learning from the step-ladder
+  focus-loss bug above. 9 new unit/render tests (190 total). Not yet verified in a real chat this
+  session — `npm test` plus tracing the render/pipeline wiring by hand only.
+- **Named-tracker cue macros — reference any tracker's level/level_pct/trend by label, not just
+  the primary tracker's** — follow-up to per-rule awareness cues above: user feedback that a rule
+  could now say something different depending on which combination of trackers matched, but the
+  cue text itself still couldn't report each contributing tracker's own numbers (e.g. "Fear is at
+  75% and rising, Compulsion is at 40%") — only prose describing the combination in the abstract.
+  `resolveAwarenessCue` (`lib/pure.js`) gained two optional params, `resolvedTrackers`/
+  `trackerById` (same `Map` shapes `resolveRuleOutput` already takes), and now additionally
+  substitutes `{{level:TrackerLabel}}`/`{{level_pct:TrackerLabel}}`/`{{trend:TrackerLabel}}` —
+  looked up by that tracker's own label (exact match) rather than id, so authors never have to
+  see/type an id. Available in **both** the effect's own Basics-tab cue and any rule's cue,
+  alongside the existing bare `{{level}}`/`{{level_pct}}`/`{{trend}}` (which always mean this
+  effect's own primary tracker, unchanged). An unmatched label is left as literal text rather than
+  silently blanked, so a typo stays visible instead of disappearing into the prompt. `applyEffects`
+  (`pipeline.js`) threads Phase A's already-computed `resolvedTrackers`/`trackerById` through
+  `updateAwarenessCue`'s two new optional params into this resolution — no new tracker-level work,
+  same values every other per-message resolution already reads. Omitting both params (existing
+  callers, e.g. the settings-panel Test panel preview) skips this pass entirely — fully backward
+  compatible; the Test panel's cue preview doesn't yet simulate named-tracker macros (same
+  documented "doesn't simulate rules" gap as before), so a named-tracker placeholder will show
+  literally there even though it resolves correctly at runtime. 4 new unit tests (194 total). Not
+  yet verified in a real chat this session.
+- **Extended tooltips to document the named-tracker cue macros, and fixed two more direction-
+  reads-backwards labels** — follow-ups in the same area: the Basics-tab and per-rule Awareness
+  cue tooltips now spell out `{{level:TrackerLabel}}` etc (they were added in the commit above but
+  the tooltip text lagged); a tracker's own **Tracker label** field's title now shows the live
+  `{{level:<label>}}` form as you type it, so the macro syntax is discoverable from the tracker
+  itself, not just the cue fields; and the Test panel's cue preview gained an info icon clarifying
+  it doesn't simulate rule-cue overrides or named-tracker macros. Separately, two labels had the
+  same "reads backwards under Hit direction: Decrease" bug already fixed for Increment per
+  hit/Min level to apply: the `cumulative-lock` dropdown option's "(never decays until dispelled)"
+  implied an escalate-and-stay-escalated framing that doesn't fit an eroding (decrease-direction)
+  tracker locking *low*, and "Lock threshold ... once level reaches this" was the same
+  mirrored-threshold wording bug `minLevelToApply` had — under Decrease the tracker actually locks
+  once the level has *fallen* to `1 - lockThreshold`, not once it "reaches" the entered number.
+  Both reworded direction-aware (`renderTriggerPanel`, `lib/render.js`), same "wording only, no
+  comparison-logic change" pattern as before. 3 new render tests (196 total).
+- **Tracker-level auto awareness cue** — design discussion landed on a cleaner split than what's
+  built so far: a **Tracker** informs the character of the user's/scene's state (a number + a
+  trend); an **Effect** transforms the user's typed message. Under that split, reporting a single
+  tracker's raw state shouldn't require an Effect at all — today it takes either an Effect's own
+  Basics-tab cue or spinning up a `none` (awareness-only) Effect purely to host one, and the
+  `{{level_pct}}`/`{{trend}}` boilerplate has to be retyped/kept consistent by hand if more than
+  one cue wants to report the same tracker. New opt-in `tracker.autoAwarenessCue` (boolean,
+  `defaultTrackerShape()`, `lib/pure.js`): while on and the tracker is past its own
+  `minLevelToApply` (same gate an Effect's own activity check already uses, including the
+  Decrease-direction mirroring), injects a **fixed-format** line — `"<Tracker label> ({{user}}):
+  NN% (<trend>)"` — independent of any Effect. `{{user}}` is included so the line is unambiguous
+  about being the user's/persona's state, not the character's — substituted by SillyTavern itself
+  (`getExtensionPrompt` runs `substituteParams` on every extension prompt), same mechanism the
+  llm-rewrite promptTemplate's own `{{user}}`/`{{char}}` support already relies on. Deliberately
+  not a user-editable template (the point is
+  eliminating the boilerplate, not adding another template surface); deliberately gated to
+  `mode: 'progressive'` only (an `'always'` tracker's level/trend are constantly `1`/`'steady'`,
+  nothing informative to report). New pure `buildTrackerAutoCueTemplate(tracker)` builds the fixed
+  template string, fed straight into the existing `resolveAwarenessCue` — no new
+  formatting/substitution logic. `pipeline.js` gained `trackerAutoCueKey(trackerId)`/
+  `clearAllTrackerAutoCues(settings)` (mirroring the Effect-cue equivalents) and a local
+  `updateTrackerAutoCue`, wired into Phase A's existing per-tracker level/trend loop (no new pass)
+  — both its inactive-in-chat early-exit and its normal per-tracker end-of-loop branch. Cleared on
+  chat switch (`index.js`), on extension disable, and on tracker deletion (`settingsUI.js`) — same
+  three places the Effect-cue equivalent is already cleared, so nothing dangles. New checkbox on
+  the Tracker's Basics tab (`renderTrackerBasicsPanel`, `lib/render.js`), hidden for `'always'`
+  trackers. This doesn't replace Effect/Rule awareness cues — those remain the tool for authored,
+  combination-aware narrative reactions (e.g. "fear AND compulsion both active" still needs a Rule
+  to react to the combination; a tracker's own auto-cue can only ever report itself). 6 new
+  unit/render tests (200 total). Not yet verified in a real chat this session.
+- **Tracker auto-cue can also describe what triggers it** — follow-up: the auto-cue reports
+  *current intensity* but not *why*, repeating the same gap the README's own "Is the lorebook
+  entry actually necessary?" FAQ already draws between an awareness cue (live number) and a
+  World Info/lorebook entry (constant, in-fiction reason the mechanic exists). New opt-in
+  `tracker.autoAwarenessCueDescribeCondition` (boolean, only meaningful alongside
+  `autoAwarenessCue`): when on, appends what actually causes the tracker to move — reusing the
+  tracker's own already-authored `llmCondition` (LLM detector) or `keywords` (keyword detector),
+  not a new field to write — e.g. `"Fear ({{user}}): 62% (escalating) — the speaker is under a
+  magical compulsion to talk about trees"`. `buildTrackerAutoCueTemplate` (`lib/pure.js`) gained
+  this logic directly (no other pipeline change — `updateTrackerAutoCue` already calls it
+  unconditionally); falls back to the plain number-only cue with no dangling `" — "` separator if
+  the relevant field is empty. Honest limitation documented rather than oversold: unlike a
+  constant lorebook entry, this still only appears while the auto-cue itself is active (past Min
+  level to apply), not from `level = 0` before anything's triggered — it closes the *content* gap,
+  not the *always-present* one. New nested checkbox in `renderTrackerBasicsPanel`
+  (`lib/render.js`), shown only once the parent `autoAwarenessCue` checkbox is also on; its
+  tooltip renders a live preview of what would actually be appended, using the tracker's current
+  `detector`/`llmCondition`/`keywords` values. 6 new unit/render tests (206 total). Not yet
+  verified in a real chat this session.
+- **Custom cue text override** — follow-up: both the auto-generated line and the "describe what
+  triggers it" addition were fixed-format by design (see above), but the user asked for an escape
+  hatch to write their own wording instead. New `tracker.autoAwarenessCueOverride` (string,
+  optional) — `buildTrackerAutoCueTemplate` (`lib/pure.js`) now checks it first and, when
+  non-empty, returns it verbatim (still resolved through the existing `resolveAwarenessCue`, so
+  `{{level}}`/`{{level_pct}}`/`{{trend}}`/`{{user}}`/`{{char}}` all still work if used) — entirely
+  bypassing both the base line and the describe-condition addition. Blank (default) falls back to
+  the auto-generated behavior exactly as before. New **Custom cue text** textarea in
+  `renderTrackerBasicsPanel` (`lib/render.js`), shown once the parent `autoAwarenessCue` checkbox
+  is on. Added to `TRACKER_NO_RERENDER_FIELDS`'s opt-out patterns up front (`settingsUI.js`) —
+  learned from the earlier step-ladder focus-loss bug, a freeform textarea with no other displayed
+  dependency must be opted out of the full re-render or every keystroke loses focus. 4 new
+  unit/render tests (210 total). Not yet verified in a real chat this session.
 
 ## v39
 

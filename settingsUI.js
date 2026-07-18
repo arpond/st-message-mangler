@@ -12,8 +12,8 @@ import {
     defaultTrackerShape, defaultTracker, defaultEffectShape, defaultEffect, defaultRule,
     restingLevelValue, resolveEffectTracker,
 } from './lib/pure.js';
-import { infoIcon, PROMPT_TEMPLATE_EXAMPLES, EFFECT_TYPE_LABELS } from './lib/render.js';
-import { applySingleEffect, clearAllAwarenessCues, awarenessCueKey } from './pipeline.js';
+import { infoIcon, field, renderScaleSteps, PROMPT_TEMPLATE_EXAMPLES, EFFECT_TYPE_LABELS } from './lib/render.js';
+import { applySingleEffect, clearAllAwarenessCues, awarenessCueKey, clearAllTrackerAutoCues, trackerAutoCueKey, clearGlobalAwarenessCue } from './pipeline.js';
 import {
     expandedTrackerIds, trackerActiveTab, renderTrackerList,
     expandedEffectIds, effectActiveTab, renderEffectList,
@@ -34,6 +34,7 @@ const TRACKER_NO_RERENDER_FIELDS = {
     exact: new Set([
         'keywords', 'llmCondition', 'llmHitThreshold', 'lockThreshold', 'llmLookback',
         'incrementPerHit', 'decayPerTurn', 'minLevelToApply', 'dispelKeywords', 'maxTurnsActive',
+        'autoAwarenessCueOverride',
     ]),
     patterns: [],
 };
@@ -44,7 +45,7 @@ const EFFECT_NO_RERENDER_FIELDS = {
     ]),
     patterns: [
         /^llmRewrite\.scaleSteps\.\d+\.(threshold|text)$/, /^rules\.\d+\.text$/,
-        /^rules\.\d+\.steps\.\d+\.(threshold|text)$/,
+        /^rules\.\d+\.steps\.\d+\.(threshold|text)$/, /^rules\.\d+\.awarenessCue$/,
     ],
 };
 function isOptedOutField(fieldPath, { exact, patterns }) {
@@ -61,6 +62,31 @@ export function refreshTrackerList(settings) {
 export function refreshEffectList(settings) {
     $('#st_mangler_effects').html(renderEffectList(settings));
     refreshStatusPanelContents(settings);
+}
+
+// Global "character awareness" — one instance, not per-tracker/per-effect, so this is a single
+// small render function rather than a list-rendering one like the two above.
+function renderGlobalAwarenessSection(settings) {
+    const ga = settings.globalAwareness;
+    return `
+        <small><b>Character awareness</b>${infoIcon('A single global value — not tied to any one Tracker — that rises whenever ANY tracker below registers a detection hit, and injects an overarching instruction as it climbs (e.g. "hasn\'t noticed anything yet" -> "can address it directly"). On by default: with no trackers configured yet it never fires (level stays 0, first step is blank), so it\'s a zero-config baseline rather than something you need to set up. Only keyword-detector trackers and LLM-detector trackers in Cumulative/Cumulative-lock mode contribute — Absolute-mode LLM trackers have no "hit" concept, and Always-mode trackers have no detector at all.')}</small>
+        <label class="checkbox_label">
+            <input type="checkbox" class="st_mangler_field" data-field="enabled" ${ga.enabled ? 'checked' : ''} />
+            Enabled
+        </label>
+        <label>
+            Increment per hit${infoIcon('Always positive — added on top of the current value each time ANY tracker registers a hit this message. Multiple different trackers hitting in the same message compound.')}
+            ${field('number', 'incrementPerHit', ga.incrementPerHit, 'step="0.01" min="0" max="1" style="max-width: 6em;"')}
+        </label>
+        <label>
+            Decay per turn${infoIcon('Always positive — subtracted once per message whenever NO keyword-detector tracker hit that message (an LLM-detector hit still bumps the value independently, on its own timeline, without resetting this decay).')}
+            ${field('number', 'decayPerTurn', ga.decayPerTurn, 'step="0.005" min="0" max="1" style="max-width: 6em;"')}
+        </label>
+        ${renderScaleSteps(ga.steps, 'steps')}`;
+}
+
+function refreshGlobalAwarenessSection(settings) {
+    $('#st_mangler_global_awareness').html(renderGlobalAwarenessSection(settings));
 }
 
 function setFieldByPath(obj, path, value) {
@@ -351,6 +377,8 @@ export function addSettingsUI() {
                         <span id="st_mangler_detection_profile_wrap">${renderDetectionProfileOptions(settings)}</span>
                     </label>
                     <hr>
+                    <div id="st_mangler_global_awareness">${renderGlobalAwarenessSection(settings)}</div>
+                    <hr>
                     <small><b>Trackers</b> (detection + level state). Each Effect below is gated by one, chosen on its Basics tab.</small>
                     <div id="st_mangler_trackers">${renderTrackerList(settings)}</div>
                     <div class="flex-container">
@@ -390,7 +418,11 @@ export function addSettingsUI() {
 
     $('#st_mangler_enabled').on('input', function () {
         settings.enabled = !!$(this).prop('checked');
-        if (!settings.enabled) clearAllAwarenessCues(settings);
+        if (!settings.enabled) {
+            clearAllAwarenessCues(settings);
+            clearAllTrackerAutoCues(settings);
+            clearGlobalAwarenessCue();
+        }
         context.saveSettingsDebounced();
     });
     $('#st_mangler_show_original').on('input', function () {
@@ -484,6 +516,7 @@ export function addSettingsUI() {
     // any referencing Effect just shows a caution icon (see renderEffectRow) until repointed.
     $('#st_mangler_trackers').on('click', '.st_mangler_tracker_delete', function () {
         const id = $(this).closest('.st_mangler_tracker').data('tracker-id');
+        context.setExtensionPrompt(trackerAutoCueKey(id), '', extension_prompt_types.IN_CHAT, 0);
         settings.trackers = settings.trackers.filter(t => t.id !== id);
         expandedTrackerIds.delete(id);
         trackerActiveTab.delete(id);
@@ -728,6 +761,57 @@ export function addSettingsUI() {
         if (!steps) return;
         moveItem(steps, $(this).data('step-index'), 1);
         refreshEffectList(settings);
+        context.saveSettingsDebounced();
+    });
+
+    // --- Character awareness (global, not per-tracker/per-effect) ---
+
+    $('#st_mangler_global_awareness').on('input', '.st_mangler_field', function () {
+        const fieldPath = $(this).data('field');
+        const isCheckbox = $(this).attr('type') === 'checkbox';
+        const isNumberLike = $(this).attr('type') === 'range' || $(this).attr('type') === 'number';
+        const value = isCheckbox ? !!$(this).prop('checked') : isNumberLike ? Number($(this).val()) : $(this).val();
+        setFieldByPath(settings.globalAwareness, fieldPath, value);
+        context.saveSettingsDebounced();
+        if (fieldPath === 'enabled' && !value) clearGlobalAwarenessCue();
+        // Only the Enabled checkbox needs a re-render (nothing else displayed depends on
+        // increment/decay/step values) — same opt-out-by-default reasoning as
+        // TRACKER_NO_RERENDER_FIELDS/EFFECT_NO_RERENDER_FIELDS, just inverted here since this
+        // section is small enough that "only re-render what actually needs it" reads clearer
+        // than a matching opt-out list for two numeric fields plus a step array.
+        if (fieldPath === 'enabled') refreshGlobalAwarenessSection(settings);
+    });
+
+    $('#st_mangler_global_awareness').on('click', '.st_mangler_scale_gen_run', function () {
+        const section = $('#st_mangler_global_awareness');
+        const count = Number(section.find('.st_mangler_scale_gen_count').val());
+        const curve = section.find('.st_mangler_scale_gen_curve').val();
+        settings.globalAwareness.steps = generateScaleSteps(count, curve, settings.globalAwareness.steps);
+        refreshGlobalAwarenessSection(settings);
+        context.saveSettingsDebounced();
+    });
+
+    $('#st_mangler_global_awareness').on('click', '.st_mangler_scale_step_add', function () {
+        settings.globalAwareness.steps.push({ threshold: 0, text: '' });
+        refreshGlobalAwarenessSection(settings);
+        context.saveSettingsDebounced();
+    });
+
+    $('#st_mangler_global_awareness').on('click', '.st_mangler_scale_step_delete', function () {
+        settings.globalAwareness.steps.splice($(this).data('step-index'), 1);
+        refreshGlobalAwarenessSection(settings);
+        context.saveSettingsDebounced();
+    });
+
+    $('#st_mangler_global_awareness').on('click', '.st_mangler_scale_step_move_up', function () {
+        moveItem(settings.globalAwareness.steps, $(this).data('step-index'), -1);
+        refreshGlobalAwarenessSection(settings);
+        context.saveSettingsDebounced();
+    });
+
+    $('#st_mangler_global_awareness').on('click', '.st_mangler_scale_step_move_down', function () {
+        moveItem(settings.globalAwareness.steps, $(this).data('step-index'), 1);
+        refreshGlobalAwarenessSection(settings);
         context.saveSettingsDebounced();
     });
 

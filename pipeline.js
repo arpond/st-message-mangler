@@ -5,13 +5,15 @@ import { getSettings, debugLog, isDebugEnabled } from './lib/settings.js';
 import {
     getTrackerLevel, setTrackerLevel, getTrackerTurnsActive, setTrackerTurnsActive, getTrackerLocked, setTrackerLocked,
     consumeTransformPaused, isPrerequisiteMet, getTrackerChatBinding, getTrackerChatActiveOverride,
+    getGlobalAwarenessLevel, setGlobalAwarenessLevel,
 } from './lib/chatState.js';
 import { runBatchedLlmDetectors, runLlmRewrite } from './lib/llmClient.js';
 import {
     matchesKeywordList, applyRegexEffect, applyDrunk, escapeHtmlForDisplay, wordDiffHighlight,
     resolveAwarenessCue, resolveLevelTrend, splitContinuationSuffix, buildRespondingToContext,
     resolveDetectionLevelUpdate, matchesBoundCharacter, resolveChatActiveState, restingLevelValue,
-    meetsDirectionalThreshold, resolveRuleOutput,
+    meetsDirectionalThreshold, resolveRuleOutput, buildTrackerAutoCueTemplate, resolveScaleStep,
+    resolveGlobalAwarenessHit, resolveGlobalAwarenessDecay,
 } from './lib/pure.js';
 
 // Gates which hook is allowed to update a tracker's level — 'user' for onMessageSent,
@@ -64,6 +66,9 @@ function isTrackerActiveInChat(tracker) {
 // suffix (see splitContinuationSuffix), so keyword/dispel matching here only ever sees new
 // content instead of re-matching (and re-incrementing on) a keyword that already hit in an
 // earlier, already-mangled portion of the same message.
+// Returns { level, hit } — `hit` (keyword detector only; always false for 'llm', see
+// resolveDetectionLevelUpdate) feeds the global "character awareness" aggregation in applyEffects'
+// Phase A. A dispel/auto-dispel is never a hit — the condition just resolved, not triggered.
 function updateAndGetTrackerLevel(tracker, detectionText, prerequisiteMet) {
     debugLog(`updateAndGetTrackerLevel "${tracker.label}": detector=${tracker.detector}, levelBefore=${getTrackerLevel(tracker).toFixed(2)}${prerequisiteMet ? '' : ' (blocked — dependency not met)'}`);
 
@@ -73,7 +78,7 @@ function updateAndGetTrackerLevel(tracker, detectionText, prerequisiteMet) {
         setTrackerTurnsActive(tracker, 0);
         setTrackerLocked(tracker, false);
         log(`Dispelled "${tracker.label}" — dispel keyword matched.`);
-        return setTrackerLevel(tracker, restingLevelValue(tracker.restingLevel));
+        return { level: setTrackerLevel(tracker, restingLevelValue(tracker.restingLevel)), hit: false };
     }
 
     // llm detector: level is read-only here (runBatchedLlmDetectors updates it elsewhere) — avoid
@@ -86,9 +91,9 @@ function updateAndGetTrackerLevel(tracker, detectionText, prerequisiteMet) {
     if (result.autoDispelled) {
         setTrackerTurnsActive(tracker, 0);
         log(`Auto-dispelled "${tracker.label}" — active for ${turns} turns (max ${tracker.maxTurnsActive}).`);
-        return setTrackerLevel(tracker, restingLevelValue(tracker.restingLevel));
+        return { level: setTrackerLevel(tracker, restingLevelValue(tracker.restingLevel)), hit: false };
     }
-    return level;
+    return { level, hit: result.hit };
 }
 
 // Single point of type dispatch, shared by the real pipeline below and the settings panel's
@@ -136,14 +141,73 @@ export function clearAllAwarenessCues(settings) {
 // Info lore. Cleared (empty value, which core's getExtensionPrompt filters out) whenever the
 // effect has no cue configured, isn't active, or is disabled — never left dangling from a
 // previous turn.
-function updateAwarenessCue(effect, level, active, trend = 'steady') {
+// ruleCue: null when this effect has no rules configured (falls back to the effect's own
+// Basics-tab awarenessCue, unchanged); a string (possibly empty) when it does — the matched
+// rule's own awarenessCue entirely replaces the effect's for this call, same "rules take over
+// once present" precedent scale_instruction already follows. See applyEffects' Phase B.
+// resolvedTrackers/trackerById (both optional): Phase A's per-tracker levels/trends and tracker
+// lookup, passed through to resolveAwarenessCue so the cue template — either the effect's own or
+// a matched rule's — can name ANY tracker's level/level_pct/trend via {{level:Label}} etc, not
+// just the primary tracker's bare {{level}}. Omitted on the three early-exit call sites below
+// (dangling tracker/disabled/inactive) since active=false clears the cue before they'd matter.
+function updateAwarenessCue(effect, level, active, trend = 'steady', ruleCue = null, resolvedTrackers = null, trackerById = null) {
     const key = awarenessCueKey(effect);
-    if (!effect.awarenessCue || !active) {
+    const cueTemplate = ruleCue !== null ? ruleCue : effect.awarenessCue;
+    if (!cueTemplate || !active) {
         context.setExtensionPrompt(key, '', extension_prompt_types.IN_CHAT, 0);
         return;
     }
-    const cue = resolveAwarenessCue(effect.awarenessCue, level, effect.promptLevelCap, trend);
+    const cue = resolveAwarenessCue(cueTemplate, level, effect.promptLevelCap, trend, resolvedTrackers, trackerById);
     context.setExtensionPrompt(key, cue, extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
+}
+
+export function trackerAutoCueKey(trackerId) {
+    return `st_mangler_tracker_cue_${trackerId}`;
+}
+
+// Same "extension_prompts is a shared in-memory map, must not bleed across chats/survive
+// disable" reasoning as clearAllAwarenessCues above, for the Tracker-owned counterpart.
+export function clearAllTrackerAutoCues(settings) {
+    for (const tracker of settings.trackers) {
+        context.setExtensionPrompt(trackerAutoCueKey(tracker.id), '', extension_prompt_types.IN_CHAT, 0);
+    }
+}
+
+// Tracker-owned counterpart to updateAwarenessCue above — reports this tracker's own state
+// (fixed format, see buildTrackerAutoCueTemplate) independent of any Effect. `active` is the
+// caller's own gate (chat-active/enabled/progressive/past minLevelToApply — see applyEffects'
+// Phase A); this function only decides whether the opt-in flag is set and formats the result.
+function updateTrackerAutoCue(tracker, level, trend, active) {
+    const key = trackerAutoCueKey(tracker.id);
+    if (!tracker.autoAwarenessCue || !active) {
+        context.setExtensionPrompt(key, '', extension_prompt_types.IN_CHAT, 0);
+        return;
+    }
+    const cue = resolveAwarenessCue(buildTrackerAutoCueTemplate(tracker), level, 0.99, trend);
+    context.setExtensionPrompt(key, cue, extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
+}
+
+// Fixed, singleton key — unlike awarenessCueKey/trackerAutoCueKey above, this one cue isn't
+// per-tracker/per-effect (settings.globalAwareness aggregates across all of them).
+const GLOBAL_AWARENESS_CUE_KEY = 'st_mangler_global_awareness_cue';
+
+export function clearGlobalAwarenessCue() {
+    context.setExtensionPrompt(GLOBAL_AWARENESS_CUE_KEY, '', extension_prompt_types.IN_CHAT, 0);
+}
+
+// Resolves settings.globalAwareness.steps against the aggregated level (see applyEffects' Phase A)
+// the same way a Tracker's own Structured-steps ladder resolves against its level — the step
+// text becomes the whole injected cue (same "no separate {{scale_instruction}}-style placeholder"
+// precedent as the rest of this codebase's cue mechanisms), still substituting
+// {{level}}/{{level_pct}}/{{trend}}/{{user}} via the existing resolveAwarenessCue.
+function updateGlobalAwarenessCue(settings, level, trend) {
+    const text = resolveScaleStep(settings.globalAwareness.steps, level);
+    if (!text) {
+        clearGlobalAwarenessCue();
+        return;
+    }
+    const cue = resolveAwarenessCue(text, level, settings.globalAwareness.promptLevelCap, trend);
+    context.setExtensionPrompt(GLOBAL_AWARENESS_CUE_KEY, cue, extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
 }
 
 // isContinuation: true when this call is reprocessing the tail end of a Continue rather than a
@@ -195,10 +259,23 @@ export async function applyEffects(originalText, message, settings, source, isCo
 
     // --- Phase A: resolve every Tracker's level/trend once ---
     const resolvedTrackers = new Map();
+    // Global "character awareness" (settings.globalAwareness) aggregates hits across every
+    // Tracker below, not any one tracker's own level — see resolveGlobalAwarenessHit's doc
+    // comment (lib/pure.js) for why this is a separate, simpler mechanism from a Tracker's own
+    // increment/decay. Capped at one increment per message from keyword hits (the first hitting
+    // tracker bumps it; further keyword hits the same message just keep the "already hit" gate
+    // true, they don't compound) — LLM hits land later/independently in
+    // lib/llmClient.js's runBatchedLlmDetectors (different timeline — see DEVELOPMENT.md), capped
+    // the same way there (one increment per batched-detector run, not per hitting tracker).
+    // Decay only applies once, after the loop, and only if no keyword tracker hit this message.
+    let globalAwarenessLevel = settings.globalAwareness.enabled ? getGlobalAwarenessLevel() : 0;
+    const previousGlobalAwarenessLevel = globalAwarenessLevel;
+    let anyKeywordHitThisMessage = false;
     for (const tracker of settings.trackers) {
         if (!tracker.enabled || !isTrackerActiveInChat(tracker)) {
             debugLog(`applyEffects: tracker "${tracker.label}" frozen — ${!tracker.enabled ? 'disabled' : 'inactive in this chat'}.`);
             resolvedTrackers.set(tracker.id, { level: getTrackerLevel(tracker), trend: 'steady' });
+            updateTrackerAutoCue(tracker, 0, 'steady', false);
             continue;
         }
         const previousLevel = tracker.mode === 'always' ? 1 : getTrackerLevel(tracker);
@@ -209,13 +286,47 @@ export async function applyEffects(originalText, message, settings, source, isCo
         // tracker whose detectSource doesn't include this speaker still reports whatever level
         // the OTHER speaker's messages put it at — it just never lets this speaker's own message
         // move that level (updateAndGetTrackerLevel is skipped, not just its result ignored).
-        const level = tracker.mode === 'always'
-            ? 1
-            : shouldDetectFromSource(tracker, source) && trackerMatchesCharacter(tracker, source, messageCharacterAvatar)
-                ? updateAndGetTrackerLevel(tracker, originalText, isPrerequisiteMet(tracker, settings.trackers))
-                : getTrackerLevel(tracker);
+        // hit (keyword-only — see updateAndGetTrackerLevel) feeds the global "character awareness"
+        // aggregation below; stays false for 'always' trackers (no detector) and whenever this
+        // speaker's message isn't allowed to drive detection.
+        let level;
+        let hit = false;
+        if (tracker.mode === 'always') {
+            level = 1;
+        } else if (shouldDetectFromSource(tracker, source) && trackerMatchesCharacter(tracker, source, messageCharacterAvatar)) {
+            const result = updateAndGetTrackerLevel(tracker, originalText, isPrerequisiteMet(tracker, settings.trackers));
+            level = result.level;
+            hit = result.hit;
+        } else {
+            level = getTrackerLevel(tracker);
+        }
         const trend = tracker.mode === 'always' ? 'steady' : resolveLevelTrend(previousLevel, level, tracker.hitDirection);
         resolvedTrackers.set(tracker.id, { level, trend });
+        if (hit && settings.globalAwareness.enabled) {
+            // Cap: only the first keyword hit this message bumps the value — further hitting
+            // trackers the same message just keep this gate true, they don't compound.
+            if (!anyKeywordHitThisMessage) {
+                globalAwarenessLevel = resolveGlobalAwarenessHit(globalAwarenessLevel, settings.globalAwareness.incrementPerHit);
+            }
+            anyKeywordHitThisMessage = true;
+        }
+        // autoAwarenessCue only ever makes sense for a progressive tracker — an 'always' tracker's
+        // level/trend are constantly 1/'steady', nothing informative to auto-report. Same
+        // minLevelToApply/hitDirection gate an Effect's own activity check uses, so this only
+        // speaks up once the state is actually notable.
+        const autoCueActive = tracker.mode === 'progressive' && meetsDirectionalThreshold(level, tracker.minLevelToApply, tracker.hitDirection);
+        updateTrackerAutoCue(tracker, level, trend, autoCueActive);
+    }
+
+    if (settings.globalAwareness.enabled) {
+        if (!anyKeywordHitThisMessage) {
+            globalAwarenessLevel = resolveGlobalAwarenessDecay(globalAwarenessLevel, settings.globalAwareness.decayPerTurn);
+        }
+        setGlobalAwarenessLevel(globalAwarenessLevel);
+        const globalAwarenessTrend = resolveLevelTrend(previousGlobalAwarenessLevel, globalAwarenessLevel, 'increase');
+        updateGlobalAwarenessCue(settings, globalAwarenessLevel, globalAwarenessTrend);
+    } else {
+        clearGlobalAwarenessCue();
     }
 
     const dueLlmDetectors = settings.trackers.filter(t => t.enabled && isTrackerActiveInChat(t) && t.mode === 'progressive'
@@ -242,10 +353,10 @@ export async function applyEffects(originalText, message, settings, source, isCo
             });
             if (hasRewriteEffect) {
                 debugLog(`applyEffects: awaiting LLM detector batch for ${dueLlmDetectors.length} tracker(s) (serialized — an llm-rewrite effect is active this message), budget remaining after=${budget.remaining}`);
-                await runBatchedLlmDetectors(dueLlmDetectors, settings.trackers);
+                await runBatchedLlmDetectors(dueLlmDetectors, settings.trackers, settings.globalAwareness);
             } else {
                 debugLog(`applyEffects: firing LLM detector batch for ${dueLlmDetectors.length} tracker(s) (background), budget remaining after=${budget.remaining}`);
-                runBatchedLlmDetectors(dueLlmDetectors, settings.trackers); // fire-and-forget, once for the whole message
+                runBatchedLlmDetectors(dueLlmDetectors, settings.trackers, settings.globalAwareness); // fire-and-forget, once for the whole message
             }
         } else {
             warn(`Skipping LLM detector batch (${dueLlmDetectors.length} tracker(s)) — LLM call budget (${settings.maxLlmCallsPerMessage}) exhausted for this message.`);
@@ -283,14 +394,16 @@ export async function applyEffects(originalText, message, settings, source, isCo
         const active = ruleOutput
             ? ruleOutput.active
             : meetsDirectionalThreshold(level, tracker.minLevelToApply, tracker.hitDirection);
-        // null (not '') when no rules are configured — runLlmRewrite tells the two cases apart to
-        // decide whether to fall back to scaleMode/scaleSteps or use this (possibly empty) text.
+        // null (not '') when no rules are configured — runLlmRewrite/updateAwarenessCue tell the
+        // two cases apart to decide whether to fall back to their own effect-level default or use
+        // this (possibly empty) rule-supplied value.
         const ruleText = ruleOutput ? ruleOutput.text : null;
+        const ruleCue = ruleOutput ? ruleOutput.cueText : null;
 
         // Awareness cue reflects the effect's true current state regardless of target — an
         // effect can be "active" (driving the narrative cue) without this speaker's message
         // being the one it transforms.
-        updateAwarenessCue(effect, level, active, trend);
+        updateAwarenessCue(effect, level, active, trend, ruleCue, resolvedTrackers, trackerById);
 
         if (!effectAppliesToTarget(effect, source)) {
             debugLog(`applyEffects: "${effect.label}" — detection updated, but target=${effect.target} excludes ${source}; no transform.`);

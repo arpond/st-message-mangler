@@ -323,6 +323,82 @@ with:
     rating locks it. The floating status panel has the same control per effect row (acting on that
     effect's tracker), for setting a level without opening the settings panel mid-scene.
 
+### Auto awareness cue: letting a Tracker inform the character directly
+
+There are two different jobs in this extension, and it's worth keeping them separate when
+deciding where a piece of information belongs: a **Tracker** informs the character of the
+user's/scene's *state* (a number and a trend); an **Effect** *transforms* the user's typed
+message. Reporting a tracker's own raw state to the character shouldn't require an Effect at all
+— that's what this is for.
+
+Each tracker's Basics tab has an **Auto-inform character (level/trend)** checkbox (hidden for
+**Always** trackers, whose level/trend never change). While it's on and the tracker is past its
+own **Min level to apply**, it automatically injects a fixed line —
+`"<Tracker label> ({{user}}): NN% (<trend>)"` — into the prompt, independent of any Effect. The
+`{{user}}` is there so it's unambiguous the line is about the user/persona, not the character;
+it's substituted by SillyTavern itself, the same as `{{user}}`/`{{char}}` anywhere else. It's not a
+template you write; the whole point is skipping the "retype `{{level_pct}}`/`{{trend}}` into every
+cue" boilerplate, not adding another one. It's the direct replacement for spinning up a `none`
+(awareness-only) Effect just to host a Basics-tab cue that only ever reported one tracker's own
+number.
+
+This doesn't replace Effect/Rule awareness cues — those are still the tool for *authored,
+combination-aware* narrative reactions. "Fear alone" vs. "fear AND compulsion both active" needs a
+Rule to react to the specific combination and say something different for each; a tracker's own
+auto-cue can only ever report itself, one line. Use the auto-cue for the simple "just tell the
+character this number" case, and an Effect's own cue or a Rule's cue for anything that needs to
+*say* something rather than *report* something.
+
+**Also describe what triggers it.** A second checkbox appears once the auto-cue itself is on:
+**Also describe what triggers it**. It appends *why* the tracker is moving, not just the number —
+reusing the tracker's own **Condition to detect** text (LLM detector) or its **Keywords** list
+(keyword detector), so the cue reads e.g. `"Fear ({{user}}): 62% (escalating) — the speaker is
+under a magical compulsion to talk about trees"`. This can reduce or eliminate needing a separate
+World Info/lorebook entry just to explain the mechanic. One real difference from a lorebook entry,
+though: this only shows up while the auto-cue itself is active (past Min level to apply) — a
+lorebook entry is constant, present from `level = 0` before anything has triggered, which this
+doesn't replicate (see "Is the lorebook entry actually necessary?" further down for the fuller
+tradeoff). Leaving the relevant field blank falls back to the plain number-only cue rather than
+appending a dangling `" — "`.
+
+**Custom cue text.** Both the auto-generated line and the "describe what triggers it" addition
+are just the *default* — a **Custom cue text** field (shown once the auto-cue itself is on) lets
+you write your own instead, entirely replacing both. It still substitutes
+`{{level}}`/`{{level_pct}}`/`{{trend}}` and SillyTavern's own `{{user}}`/`{{char}}` if you use
+them, exactly like an Effect's own Awareness cue does. Leave it blank to keep the auto-generated
+line; type anything into it to take over completely.
+
+### Character awareness: a global "how attuned is the character" value
+
+Every Tracker/auto-cue above is scoped to one specific condition. **Character awareness** (top of
+the settings panel, above the Trackers list) is different: a single value that isn't tied to any
+one tracker at all — it rises whenever **any** tracker registers a detection hit, and injects an
+overarching instruction as it climbs, e.g. "You haven't consciously registered anything specific
+about {{user}} yet" at low levels, up to "You're fully aware of what's going on with {{user}} and
+can address it directly and specifically" at high ones (default step ladder, fully editable — same
+threshold+text editor Structured steps uses).
+
+It's **on by default** — the one deliberate exception to this extension's usual opt-in-everything
+approach. That's safe because it's a total no-op with nothing configured: the first step's text is
+blank, so with no trackers at all (or trackers that never hit) the level just sits at 0 and nothing
+is ever injected. Turn it off entirely, or tune **Increment per hit**/**Decay per turn**, from the
+Character awareness section itself.
+
+Only **keyword**-detector trackers and **LLM**-detector trackers in **Cumulative**/
+**Cumulative-lock** mode contribute a "hit" — an **Absolute**-mode LLM tracker's level just swings
+freely to match the latest rating (no threshold-crossing to call a hit), and an **Always**-mode
+tracker has no detector at all. One honest timing wrinkle: a keyword hit updates the value
+immediately, but an LLM hit resolves on its own separate timeline (the batched detector call can
+finish *after* the current message has already been sent) — so an LLM-driven bump shows up
+starting the *next* message rather than the one that triggered it. This is the same lag an
+LLM-detector tracker's own cues already have; nothing new.
+
+**Capped at one increment per message.** If three different trackers all hit in the same message,
+Character awareness only goes up by one **Increment per hit**, not three — the keyword side and
+the LLM side (per batched-detector run) are each capped independently this way. There's no
+configurable cap value; it's a flat "the first hit this turn counts, the rest don't" rule on both
+sides.
+
 ### Per-chat activation and character binding
 
 Trackers are defined globally (one config, usable in any chat), but whether a tracker actually
@@ -388,7 +464,8 @@ text (Scaling: Freeform) or its own step ladder (Scaling: Structured steps — s
 *same* placeholder Structured steps fills in from a threshold list when no rules are configured,
 so there's nothing to reconcile in the template: whichever mechanism is active for this effect
 supplies that one placeholder, never both at once. `regex`/`drunk`/`none` (awareness-only) effects
-have no `{{scale_instruction}}` to fill, so their rule rows show only conditions — the instruction
+have no `{{scale_instruction}}` to fill, so their rule rows show only conditions (plus the
+Awareness cue field below — see "Per-rule awareness cue" further down) — the instruction
 text/step ladder field is hidden for these types rather than shown and silently ignored. Rules
 still gate activation for these types exactly the same way (and for `none`, gating is the whole
 point — it's how you drive an awareness cue or status badge off a tracker combination without any
@@ -421,6 +498,31 @@ completely different one for "fear while cornered," rather than reusing the same
 prose for every condition. The Rules tab's own default Structured-steps ladder (shown above the
 rule list) is the fallback used only while no rules exist; it's unused (and the panel says so, in
 effect, by not showing it) once any rule is added.
+
+**Per-rule awareness cue.** Independent of `{{scale_instruction}}` entirely, each rule also has its
+own optional **Awareness cue** field — shown for every effect type, including `none`, unlike
+Instruction text/Step ladder which are `llm-rewrite`-only. When a rule matches, its cue text
+entirely replaces the effect's own Basics-tab **Live awareness cue** for that call, same
+`{{level}}`/`{{level_pct}}`/`{{trend}}` placeholders (still substituted from the Basics-tab
+tracker). This is what lets an awareness-only (or any) effect say something different depending on
+*which* combination of trackers is driving it — e.g. "she's uneasy" when only a `fear` tracker is
+up, "she's uneasy and can't stop talking about it" when both `fear` and `compulsion` are, via two
+ordered rules each with its own conditions and its own cue text. Same first-match/stack resolution
+as `{{scale_instruction}}`: with **Stack all matches**, every matching rule's non-blank cue text is
+joined. No rules configured → the effect's own Basics-tab cue is used exactly as before.
+
+**Naming a specific tracker in a cue.** Both the Basics-tab cue and any rule's own cue can go
+beyond the bare `{{level}}`/`{{level_pct}}`/`{{trend}}` (which always mean this effect's own
+primary tracker) and name a *different* tracker directly:
+`{{level:TrackerLabel}}` / `{{level_pct:TrackerLabel}}` / `{{trend:TrackerLabel}}`, where
+`TrackerLabel` is exactly that tracker's own **Tracker label** field (case-sensitive). This is
+what actually lets a cue report each contributing tracker's own numbers instead of only reacting
+to *which* rule matched in the abstract — continuing the `fear`/`compulsion` example above, a rule
+matching on both could read `[System: fear is at {{level_pct:Fear}}% and {{trend:Fear}}, the
+compulsion to speak of it is at {{level_pct:Compulsion}}%.]` rather than a single blended
+description. A label that matches no tracker (typo, or the tracker was deleted) is left as literal
+text in the injected prompt rather than silently vanishing, so a mistake is visible. Not previewed
+by the effect's Test panel — its cue preview only resolves the bare, unqualified placeholders.
 
 ### Worked examples: resting level, hit direction, and dependencies together
 
