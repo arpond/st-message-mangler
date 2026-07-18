@@ -125,6 +125,7 @@ test('migrateEffectsToTrackers splits a fused effect into a tracker (keeping the
     const tracker = settings.trackers[0];
     assert.equal(tracker.id, 'effect_1'); // preserves the original id so chatMetadata keys carry over untouched
     assert.equal(tracker.label, 'Tense'); // label lived on the fused effect's top level, not under .trigger
+    assert.equal(tracker.enabled, true); // enabled also lived on the fused effect's top level, not under .trigger
     assert.equal(tracker.mode, 'progressive');
     assert.equal(tracker.keywords, 'tense');
     assert.equal(tracker.chatActivationMode, 'manual');
@@ -138,6 +139,25 @@ test('migrateEffectsToTrackers splits a fused effect into a tracker (keeping the
     assert.equal(effect.trigger, undefined);
     assert.equal(effect.chatActivationMode, undefined);
     assert.equal(logs.length, 1);
+});
+
+test('migrateEffectsToTrackers carries a disabled effect\'s enabled=false onto its new tracker', () => {
+    const settings = {
+        effects: [{
+            id: 'effect_1', label: 'Off', enabled: false, type: 'none', target: 'user', awarenessCue: '', promptLevelCap: 0.99,
+            // Real pre-split trigger never had `enabled`/`label`/`chatActivationMode` — those
+            // lived only on the fused effect's top level — so this fixture deliberately omits
+            // them from `trigger`, unlike defaultTrackerShape()'s own defaults.
+            trigger: { mode: 'always', detector: 'llm', dependencies: [] },
+            regex: { pattern: '', flags: 'gi', replacement: '' }, drunk: { intensity: 0.3 },
+            llmRewrite: { promptTemplate: '', scaleMode: 'freeform', scaleSteps: [], sceneLookback: 4, maxResponseTokens: 600 },
+        }],
+    };
+    migrateEffectsToTrackers(settings);
+    // A disabled effect's detector must not silently resume after the split — backfillDefaults
+    // would otherwise fill a missing `enabled` key on the tracker to `true`.
+    assert.equal(settings.trackers[0].enabled, false);
+    assert.equal(settings.effects[0].enabled, false);
 });
 
 test('migrateEffectsToTrackers renames dependency references from effectId to trackerId', () => {

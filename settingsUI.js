@@ -9,7 +9,7 @@ import { runDetectionTest } from './lib/llmClient.js';
 import {
     escapeHtmlForDisplay, resolveAwarenessCue, backfillDefaults,
     resolveScaleStep, generateScaleSteps, sanitizeScaleSteps,
-    defaultTrackerShape, defaultTracker, defaultEffectShape, defaultEffect, migrateEffectsToTrackers,
+    defaultTrackerShape, defaultTracker, defaultEffectShape, defaultEffect,
     restingLevelValue,
 } from './lib/pure.js';
 import { infoIcon, PROMPT_TEMPLATE_EXAMPLES, EFFECT_TYPE_LABELS } from './lib/render.js';
@@ -91,31 +91,29 @@ function exportSingleEffect(effect, settings) {
 // existing ones), so importing is always a safe, additive action — reorder/delete afterward as
 // needed. Dependency references are always dropped on import — same reasoning as duplicate: a
 // foreign id almost certainly doesn't resolve to anything meaningful in this settings' tracker
-// list. A pre-decoupling export (no "trackers" array — effects still carry a fused `.trigger`) is
-// split via the same one-time migration real settings go through before importing, so old export
-// files stay importable.
+// list. Requires a current-shape export (a "trackers" array alongside "effects") — a
+// pre-decoupling export (effects still carrying a fused `.trigger`, no top-level "trackers") is
+// rejected rather than auto-split; that split path existed at one point but was never exercised
+// by a real user and added real complexity (a throwaway migration pass just for this one import
+// case) for a scenario nobody actually hits, so it was dropped rather than fixed.
 async function importSettingsFromFile(file, settings) {
     try {
         const text = await file.text();
         const data = JSON.parse(text);
-        if (!Array.isArray(data.effects)) throw new Error('No "effects" array found in file.');
-
-        const staging = {
-            trackers: structuredClone(Array.isArray(data.trackers) ? data.trackers : []),
-            effects: structuredClone(data.effects),
-        };
-        if (!Array.isArray(data.trackers)) migrateEffectsToTrackers(staging, warn);
+        if (!Array.isArray(data.trackers) || !Array.isArray(data.effects)) {
+            throw new Error('No "trackers"/"effects" arrays found in file — exports from before the Tracker/Effect split aren\'t supported; re-export from a current version.');
+        }
 
         const idMap = new Map();
-        for (const tracker of staging.trackers) {
+        for (const tracker of data.trackers) {
             const freshId = `tracker_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
             idMap.set(tracker.id, freshId);
-            const freshTracker = { ...tracker, id: freshId, dependencies: [] };
+            const freshTracker = { ...structuredClone(tracker), id: freshId, dependencies: [] };
             backfillDefaults(freshTracker, defaultTrackerShape(), warn);
             settings.trackers.push(freshTracker);
         }
-        for (const effect of staging.effects) {
-            const freshEffect = { ...effect, id: `effect_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` };
+        for (const effect of data.effects) {
+            const freshEffect = { ...structuredClone(effect), id: `effect_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` };
             freshEffect.trackerId = idMap.get(effect.trackerId) ?? null;
             backfillDefaults(freshEffect, defaultEffectShape(freshEffect.type), warn);
             sanitizeScaleSteps(freshEffect.llmRewrite.scaleSteps, warn);
@@ -124,7 +122,7 @@ async function importSettingsFromFile(file, settings) {
         refreshTrackerList(settings);
         refreshEffectList(settings);
         context.saveSettingsDebounced();
-        toastr.success(`Imported ${staging.effects.length} effect(s) and ${staging.trackers.length} tracker(s).`);
+        toastr.success(`Imported ${data.effects.length} effect(s) and ${data.trackers.length} tracker(s).`);
     } catch (err) {
         warn('Import failed:', err.message);
         toastr.error(`Import failed: ${err.message}`);
@@ -739,7 +737,12 @@ export function addSettingsUI() {
         context.saveSettingsDebounced();
 
         // type/llmRewrite.scaleMode changes swap visible sub-fields — full row re-render needed.
-        if (fieldPath === 'type' || fieldPath === 'llmRewrite.scaleMode') {
+        // trackerId also needs it: the header's dangling-tracker warning is only evaluated at
+        // render time, and the floating status panel bakes data-tracker-id into its row markup at
+        // render time too — without this, repointing an effect at a different tracker leaves the
+        // status panel's live controls (active/level/binding) silently acting on the *previous*
+        // tracker until some other change happens to force a refresh.
+        if (fieldPath === 'type' || fieldPath === 'llmRewrite.scaleMode' || fieldPath === 'trackerId') {
             refreshEffectList(settings);
         } else if (fieldPath === 'enabled' || fieldPath === 'label') {
             // Header-row edits that don't re-render the effect list but do change what the

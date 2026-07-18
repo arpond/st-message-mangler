@@ -26,8 +26,9 @@ successive rounds of development.
     Tracker; any Effect using it inherits both automatically.
   - "Add effect" auto-creates and pairs a fresh Tracker, so the zero-config single-effect
     workflow is unchanged; "Add tracker" also exists standalone for building a shared Tracker.
-  - Export/Import now includes Trackers alongside Effects; an export from an older version (no
-    `trackers` array) is still importable, migrated on the way in.
+  - Export/Import now includes Trackers alongside Effects; requires a current-shape export (a
+    `trackers` array). An export from before this split isn't accepted — re-export from a current
+    version first.
   - Detection testing ("Test detection") moved to the Tracker's own Test tab.
   - Deleting a Tracker that Effects still reference doesn't block — those Effects show a caution
     icon and are treated as inert, same fail-open precedent as a dangling dependency/character
@@ -35,6 +36,18 @@ successive rounds of development.
   - **Fixed** (found during live verification): the migration left every split Tracker's `label`
     blank — it lived on the old fused effect's top level, not under `.trigger`, so it was never
     carried over. Trackers now inherit their source effect's label on split.
+  - **Fixed** (found via code review): the migration also never carried a disabled effect's
+    `enabled: false` onto its new Tracker, so a deliberately-turned-off effect's detector (LLM
+    calls included) would have silently resumed after upgrading. Trackers now inherit `enabled`
+    from their source effect too.
+  - **Fixed** (found via code review): repointing an effect at a different Tracker (Basics tab
+    picker) didn't refresh the row or the floating status panel, leaving the dangling-tracker
+    warning and the status panel's live controls acting on the previous Tracker until an unrelated
+    change forced a refresh.
+  - **Removed**: the auto-splitting import path for pre-decoupling export files (added, then found
+    broken by code review — a guard short-circuit meant it silently dropped every imported
+    effect's tracker/detection config instead of splitting it). Dropped rather than fixed since
+    there are no real files depending on it; import now requires a current-shape export.
 
 ## v34
 

@@ -92,8 +92,9 @@ Open the **Message Mangler** drawer in the Extensions settings panel.
   effects** downloads the current tracker + effect lists as JSON; **Import effects** reads a JSON
   file back in, appending its trackers and effects as new entries (each gets a fresh id, so
   importing never overwrites or collides with what you already have — reorder/delete afterward as
-  needed; a file exported by an older version of this extension is still importable, migrated on
-  the way in). Every effect also has a **Test** panel: type sample text, adjust the **Test at
+  needed; requires a current-shape export, i.e. one with a `trackers` array — a file exported
+  before the Tracker/Effect split is rejected with a message to re-export). Every effect also has
+  a **Test** panel: type sample text, adjust the **Test at
   level** slider (drunk/llm-rewrite only — regex ignores level entirely), click **Run test**, and
   see that one effect's output in isolation without sending a real chat message — useful for tuning
   a regex pattern, checking a drunk effect's intensity curve at different levels, or an LLM-rewrite
