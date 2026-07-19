@@ -4,6 +4,15 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v41
+
+- **Trackers & Effects moved into a wide modal** — a new **Configure Trackers & Effects** button
+  (under Detection connection) opens a large popup with Trackers on the left and Effects on the
+  right, side by side, freeing the drawer's narrower width for everything else. The existing
+  Trackers/Effects DOM is *reparented* into the popup on open and back into the drawer on close,
+  not rebuilt — every existing tracker/effect interaction (add/duplicate/delete/move, tabs, field
+  edits, dependencies, rules, test panels, export/import) keeps working unchanged.
+
 ## v40
 
 - **Global "character awareness" meta-value** — a new, single, chat-scoped value that isn't tied

@@ -1,9 +1,11 @@
 import { extension_prompt_types } from '../../../../script.js';
+import { Popup, POPUP_TYPE } from '../../../popup.js';
 import { context } from './lib/context.js';
 import { log, warn } from './lib/log.js';
 import { getSettings } from './lib/settings.js';
 import {
     getTrackerLevel, getTrackerLocked, setTrackerLevel, setTrackerTurnsActive, setTrackerLocked, setTransformPaused,
+    describeDependencyState,
 } from './lib/chatState.js';
 import { runDetectionTest } from './lib/llmClient.js';
 import {
@@ -12,7 +14,10 @@ import {
     defaultTrackerShape, defaultTracker, defaultEffectShape, defaultEffect, defaultRule,
     restingLevelValue, resolveEffectTracker,
 } from './lib/pure.js';
-import { infoIcon, field, renderScaleSteps, PROMPT_TEMPLATE_EXAMPLES, EFFECT_TYPE_LABELS } from './lib/render.js';
+import {
+    infoIcon, field, renderScaleSteps, dependencyWarningIconHtml, dependencyStatusLineHtml,
+    PROMPT_TEMPLATE_EXAMPLES, EFFECT_TYPE_LABELS,
+} from './lib/render.js';
 import { applySingleEffect, clearAllAwarenessCues, awarenessCueKey, clearAllTrackerAutoCues, trackerAutoCueKey, clearGlobalAwarenessCue } from './pipeline.js';
 import {
     expandedTrackerIds, trackerActiveTab, renderTrackerList,
@@ -27,16 +32,22 @@ import { refreshStatusPanelContents, toggleStatusPanel } from './statusPanel.js'
 // field defaults to a full re-render now — see DEVELOPMENT.md/IMPROVEMENT_TRACKER.md: an opt-out
 // list degrades a missed case to "re-renders slightly more than necessary" instead of the
 // opt-in allowlist's failure mode, "silently shows stale text" (bit twice: dependency minLevel,
-// and dependsOnMinLevel before it). `dependencies.*.minLevel`/`rules.*.conditions.*.minLevel`
-// are deliberately NOT opted out despite being typed numbers — the dependency/rule status text
-// embeds their value directly.
+// and dependsOnMinLevel before it).
+// `dependencies.*.minLevel` IS opted out here despite its status text depending on the live
+// value — a full re-render was destroying the very input being typed into (same focus-loss bug
+// class as the step-ladder fix above), so the field handler below instead calls
+// refreshTrackerDependencyStatus() to patch just the header caution icon and the Dependency tab's
+// status line in place, leaving every row's inputs (including the one mid-edit) untouched.
+// `rules.*.conditions.*.minLevel` has no live consumer at all (no rule-level equivalent of
+// describeDependencyState exists) — opting it out costs nothing, so it's a plain pattern entry,
+// no targeted-refresh counterpart needed.
 const TRACKER_NO_RERENDER_FIELDS = {
     exact: new Set([
         'keywords', 'llmCondition', 'llmHitThreshold', 'lockThreshold', 'llmLookback',
         'incrementPerHit', 'decayPerTurn', 'minLevelToApply', 'dispelKeywords', 'maxTurnsActive',
         'autoAwarenessCueOverride',
     ]),
-    patterns: [],
+    patterns: [/^dependencies\.\d+\.minLevel$/],
 };
 const EFFECT_NO_RERENDER_FIELDS = {
     exact: new Set([
@@ -46,8 +57,19 @@ const EFFECT_NO_RERENDER_FIELDS = {
     patterns: [
         /^llmRewrite\.scaleSteps\.\d+\.(threshold|text)$/, /^rules\.\d+\.text$/,
         /^rules\.\d+\.steps\.\d+\.(threshold|text)$/, /^rules\.\d+\.awarenessCue$/,
+        /^rules\.\d+\.conditions\.\d+\.minLevel$/,
     ],
 };
+
+// Patches the two dependencies.*.minLevel-dependent live displays (header caution icon, Dependency
+// tab status line) in place, without touching any row's inputs — see TRACKER_NO_RERENDER_FIELDS
+// comment above. Mirrors refreshTrackerStatusBadge's (lib/chatState.js) "small targeted
+// .html()/.replaceWith() instead of a full row rebuild" idiom.
+function refreshTrackerDependencyStatus(tracker, allTrackers) {
+    const dependencyState = describeDependencyState(tracker, allTrackers);
+    $(`.st_mangler_dependency_warning_slot[data-tracker-id="${tracker.id}"]`).html(dependencyWarningIconHtml(dependencyState));
+    $(`.st_mangler_dependency_status[data-tracker-id="${tracker.id}"]`).html(dependencyStatusLineHtml(dependencyState));
+}
 function isOptedOutField(fieldPath, { exact, patterns }) {
     return exact.has(fieldPath) || patterns.some(re => re.test(fieldPath));
 }
@@ -376,40 +398,49 @@ export function addSettingsUI() {
                         Detection connection${infoIcon('Send LLM classification through a different connection profile than the main chat (e.g. a cheaper/faster model). Rewrites always use the main connection.')}
                         <span id="st_mangler_detection_profile_wrap">${renderDetectionProfileOptions(settings)}</span>
                     </label>
-                    <hr>
-                    <div id="st_mangler_global_awareness">${renderGlobalAwarenessSection(settings)}</div>
-                    <hr>
-                    <small><b>Trackers</b> (detection + level state). Each Effect below is gated by one, chosen on its Basics tab.</small>
-                    <div id="st_mangler_trackers">${renderTrackerList(settings)}</div>
                     <div class="flex-container">
-                        <div id="st_mangler_add_tracker" class="menu_button menu_button_icon">
-                            <i class="fa-solid fa-plus"></i> Add tracker
+                        <div id="st_mangler_open_trackers_effects_modal" class="menu_button menu_button_icon">
+                            <i class="fa-solid fa-up-right-and-down-left-from-center"></i> Configure Trackers &amp; Effects
                         </div>
                     </div>
                     <hr>
-                    <small><b>Effects</b> (applied in order). Each is behavior only — a transform and/or an awareness cue,
-                    gated by the tracker it's paired with.</small>
-                    <div id="st_mangler_effects">${renderEffectList(settings)}</div>
-                    <div class="flex-container">
-                        <div id="st_mangler_add_effect" class="menu_button menu_button_icon">
-                            <i class="fa-solid fa-plus"></i> Add effect
+                    <div id="st_mangler_global_awareness">${renderGlobalAwarenessSection(settings)}</div>
+                    <hr id="st_mangler_trackers_home"><!-- st_mangler_trackers_pane lives here when not in the modal -->
+                    <div id="st_mangler_trackers_pane" style="display: none;">
+                        <small><b>Trackers</b> (detection + level state). Each Effect below is gated by one, chosen on its Basics tab.</small>
+                        <div id="st_mangler_trackers">${renderTrackerList(settings)}</div>
+                        <div class="flex-container">
+                            <div id="st_mangler_add_tracker" class="menu_button menu_button_icon">
+                                <i class="fa-solid fa-plus"></i> Add tracker
+                            </div>
                         </div>
-                        <div id="st_mangler_expand_all" class="menu_button menu_button_icon">
-                            <i class="fa-solid fa-angles-down"></i> Expand all
+                    </div>
+                    <hr id="st_mangler_effects_home"><!-- st_mangler_effects_pane lives here when not in the modal -->
+                    <div id="st_mangler_effects_pane" style="display: none;">
+                        <small><b>Effects</b> (applied in order). Each is behavior only — a transform and/or an awareness cue,
+                        gated by the tracker it's paired with.</small>
+                        <div id="st_mangler_effects">${renderEffectList(settings)}</div>
+                        <div class="flex-container">
+                            <div id="st_mangler_add_effect" class="menu_button menu_button_icon">
+                                <i class="fa-solid fa-plus"></i> Add effect
+                            </div>
+                            <div id="st_mangler_expand_all" class="menu_button menu_button_icon">
+                                <i class="fa-solid fa-angles-down"></i> Expand all
+                            </div>
+                            <div id="st_mangler_collapse_all" class="menu_button menu_button_icon">
+                                <i class="fa-solid fa-angles-up"></i> Collapse all
+                            </div>
+                            <div id="st_mangler_status_panel_toggle" class="menu_button menu_button_icon" title="Floating panel showing each progressive tracker's live level while you chat">
+                                <i class="fa-solid fa-gauge-high"></i> Status panel
+                            </div>
+                            <div id="st_mangler_export" class="menu_button menu_button_icon">
+                                <i class="fa-solid fa-download"></i> Export effects
+                            </div>
+                            <div id="st_mangler_import" class="menu_button menu_button_icon">
+                                <i class="fa-solid fa-upload"></i> Import effects
+                            </div>
+                            <input id="st_mangler_import_file" type="file" accept="application/json" style="display: none;" />
                         </div>
-                        <div id="st_mangler_collapse_all" class="menu_button menu_button_icon">
-                            <i class="fa-solid fa-angles-up"></i> Collapse all
-                        </div>
-                        <div id="st_mangler_status_panel_toggle" class="menu_button menu_button_icon" title="Floating panel showing each progressive tracker's live level while you chat">
-                            <i class="fa-solid fa-gauge-high"></i> Status panel
-                        </div>
-                        <div id="st_mangler_export" class="menu_button menu_button_icon">
-                            <i class="fa-solid fa-download"></i> Export effects
-                        </div>
-                        <div id="st_mangler_import" class="menu_button menu_button_icon">
-                            <i class="fa-solid fa-upload"></i> Import effects
-                        </div>
-                        <input id="st_mangler_import_file" type="file" accept="application/json" style="display: none;" />
                     </div>
                 </div>
             </div>
@@ -444,6 +475,37 @@ export function addSettingsUI() {
     $('#st_mangler_detection_profile_wrap').on('input', '#st_mangler_detection_profile', function () {
         settings.detectionConnectionProfileId = $(this).val();
         context.saveSettingsDebounced();
+    });
+
+    // Trackers/Effects live in one shared set of DOM nodes (#st_mangler_trackers_pane/
+    // #st_mangler_effects_pane) that every delegated handler below is bound to directly — opening
+    // this modal *relocates* those existing nodes into the popup rather than rebuilding them from
+    // HTML, so none of those bindings need to change. Closing moves them back to their `_home`
+    // marker (the `<hr>` immediately preceding each pane in the drawer) via insertAfter.
+    $('#st_mangler_open_trackers_effects_modal').on('click', function () {
+        const contentHtml = `
+            <div class="st_mangler_modal_columns">
+                <div id="st_mangler_modal_tracker_slot"></div>
+                <div id="st_mangler_modal_effect_slot"></div>
+            </div>`;
+        const popup = new Popup(contentHtml, POPUP_TYPE.TEXT, '', {
+            large: true,
+            leftAlign: true,
+            allowVerticalScrolling: true,
+            okButton: false,
+            cancelButton: 'Close',
+            onClose: () => {
+                $('#st_mangler_trackers_pane').insertAfter('#st_mangler_trackers_home').hide();
+                $('#st_mangler_effects_pane').insertAfter('#st_mangler_effects_home').hide();
+            },
+        });
+        // Popup builds this.content synchronously in its constructor, but that node isn't attached
+        // to `document` until show() runs — so the slots must be looked up via popup.content
+        // directly (works whether or not the dialog is in the document yet), not a global `$('#…')`
+        // selector, which would find nothing until after show() attaches it.
+        $(popup.content).find('#st_mangler_modal_tracker_slot').append($('#st_mangler_trackers_pane').show());
+        $(popup.content).find('#st_mangler_modal_effect_slot').append($('#st_mangler_effects_pane').show());
+        popup.show();
     });
 
     // --- Trackers ---
@@ -592,14 +654,18 @@ export function addSettingsUI() {
 
         // enabled/label are header-row edits that don't re-render the tracker list but do change
         // what the floating status panel shows, and (label only) what Effects' tracker-picker
-        // options display. Everything else defaults to a full re-render (see
-        // TRACKER_NO_RERENDER_FIELDS above for the opt-out) — covers mode/detector/
-        // llmIntegrationMode swapping visible sub-fields, a dependency row's trackerId/minLevel
-        // re-evaluating the broken/blocked status line and every other tracker's picker options,
-        // and e.g. hitBehavior toggling the Increment-per-hit row's visibility.
+        // options display. A dependency row's minLevel gets its own targeted refresh (see
+        // TRACKER_NO_RERENDER_FIELDS/refreshTrackerDependencyStatus above) rather than a full
+        // re-render, so the input being typed into doesn't lose focus. Everything else defaults to
+        // a full re-render (see TRACKER_NO_RERENDER_FIELDS above for the rest of the opt-out) —
+        // covers mode/detector/llmIntegrationMode swapping visible sub-fields, a dependency row's
+        // trackerId changing every other tracker's picker options, and e.g. hitBehavior toggling
+        // the Increment-per-hit row's visibility.
         if (fieldPath === 'enabled' || fieldPath === 'label') {
             refreshStatusPanelContents(settings);
             if (fieldPath === 'label') refreshEffectList(settings);
+        } else if (/^dependencies\.\d+\.minLevel$/.test(fieldPath)) {
+            refreshTrackerDependencyStatus(tracker, settings.trackers);
         } else if (!isOptedOutField(fieldPath, TRACKER_NO_RERENDER_FIELDS)) {
             refreshTrackerList(settings);
         }

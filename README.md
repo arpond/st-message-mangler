@@ -39,7 +39,10 @@ Restart SillyTavern (or reload the page) and enable it from the Extensions panel
 
 ## Usage
 
-Open the **Message Mangler** drawer in the Extensions settings panel.
+Open the **Message Mangler** drawer in the Extensions settings panel. Trackers and Effects are
+configured in a wide modal, opened via the **Configure Trackers & Effects** button (just under
+Detection connection) — everything else (global toggles, Detection connection, Character
+awareness) stays in the drawer itself.
 
 - **Enabled** — master on/off switch.
 - **Show original text alongside mangled** — when on, the chat bubble shows the final mangled
@@ -370,9 +373,9 @@ line; type anything into it to take over completely.
 
 ### Character awareness: a global "how attuned is the character" value
 
-Every Tracker/auto-cue above is scoped to one specific condition. **Character awareness** (top of
-the settings panel, above the Trackers list) is different: a single value that isn't tied to any
-one tracker at all — it rises whenever **any** tracker registers a detection hit, and injects an
+Every Tracker/auto-cue above is scoped to one specific condition. **Character awareness** (in the
+drawer itself, above the **Configure Trackers & Effects** button's modal) is different: a single
+value that isn't tied to any one tracker at all — it rises whenever **any** tracker registers a detection hit, and injects an
 overarching instruction as it climbs, e.g. "You haven't consciously registered anything specific
 about {{user}} yet" at low levels, up to "You're fully aware of what's going on with {{user}} and
 can address it directly and specifically" at high ones (default step ladder, fully editable — same

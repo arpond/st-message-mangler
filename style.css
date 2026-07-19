@@ -1,20 +1,20 @@
-.st-message-mangler-settings .st_mangler_effect {
+.st_mangler_effect {
     border: 1px solid var(--SmartThemeBorderColor, #444);
     border-radius: 6px;
     padding: 0.4em;
     margin: 0.4em 0;
 }
 
-.st-message-mangler-settings .st_mangler_effect input.text_pole {
+.st_mangler_effect input.text_pole {
     flex: 1;
 }
 
-.st-message-mangler-settings .st_mangler_effect_toggle {
+.st_mangler_effect_toggle {
     flex: 0 0 auto;
     cursor: pointer;
 }
 
-.st-message-mangler-settings .st_mangler_effect_title_input {
+.st_mangler_effect_title_input {
     flex: 1;
     font-weight: bold;
     border: 1px solid transparent;
@@ -22,27 +22,27 @@
     min-width: 3em;
 }
 
-.st-message-mangler-settings .st_mangler_effect_title_input:hover,
-.st-message-mangler-settings .st_mangler_effect_title_input:focus {
+.st_mangler_effect_title_input:hover,
+.st_mangler_effect_title_input:focus {
     border-color: var(--SmartThemeBorderColor, #444);
     background: var(--SmartThemeBlurTintColor, rgba(0, 0, 0, 0.15));
 }
 
-.st-message-mangler-settings .st_mangler_effect_summary_type {
+.st_mangler_effect_summary_type {
     opacity: 0.7;
     font-size: 0.9em;
     white-space: nowrap;
 }
 
-.st-message-mangler-settings .st_mangler_effect_body {
+.st_mangler_effect_body {
     margin-top: 0.4em;
 }
 
-.st-message-mangler-settings .st_mangler_test_panel textarea {
+.st_mangler_test_panel textarea {
     margin: 0.2em 0;
 }
 
-.st-message-mangler-settings .st_mangler_tab_strip {
+.st_mangler_tab_strip {
     display: flex;
     flex-wrap: wrap;
     gap: 0.2em;
@@ -50,7 +50,7 @@
     border-bottom: 1px solid var(--SmartThemeBorderColor, #444);
 }
 
-.st-message-mangler-settings .st_mangler_tab_btn {
+.st_mangler_tab_btn {
     padding: 0.25em 0.6em;
     cursor: pointer;
     font-size: 0.85em;
@@ -58,17 +58,17 @@
     border-bottom: 2px solid transparent;
 }
 
-.st-message-mangler-settings .st_mangler_tab_btn.active {
+.st_mangler_tab_btn.active {
     opacity: 1;
     font-weight: 600;
     border-bottom-color: var(--SmartThemeQuoteColor, #e91e63);
 }
 
-.st-message-mangler-settings .st_mangler_tab_pane {
+.st_mangler_tab_pane {
     padding-top: 0.4em;
 }
 
-.st-message-mangler-settings .st_mangler_scale_step {
+.st_mangler_scale_step {
     display: flex;
     align-items: center;
     gap: 0.4em;
@@ -77,38 +77,38 @@
     border-bottom: 1px dashed var(--SmartThemeBorderColor, #666);
 }
 
-.st-message-mangler-settings .st_mangler_scale_step_label {
+.st_mangler_scale_step_label {
     flex: 0 0 auto;
     font-size: 0.8em;
     opacity: 0.7;
     white-space: nowrap;
 }
 
-.st-message-mangler-settings .st_mangler_scale_step input[type="number"] {
+.st_mangler_scale_step input[type="number"] {
     flex: 0 0 4em;
 }
 
-.st-message-mangler-settings .st_mangler_scale_step textarea {
+.st_mangler_scale_step textarea {
     flex: 1;
     min-height: unset;
 }
 
-.st-message-mangler-settings .st_mangler_dependency_row {
+.st_mangler_dependency_row {
     display: flex;
     align-items: center;
     gap: 0.4em;
     margin: 0.2em 0;
 }
 
-.st-message-mangler-settings .st_mangler_dependency_row select {
+.st_mangler_dependency_row select {
     flex: 1;
 }
 
-.st-message-mangler-settings .st_mangler_scale_gen_count {
+.st_mangler_scale_gen_count {
     flex: 0 0 5em;
 }
 
-.st-message-mangler-settings .st_mangler_scale_gen {
+.st_mangler_scale_gen {
     display: flex;
     align-items: center;
     gap: 0.4em;
@@ -118,7 +118,7 @@
     font-size: 0.85em;
 }
 
-.st-message-mangler-settings .st_mangler_template_helper {
+.st_mangler_template_helper {
     display: flex;
     align-items: center;
     gap: 0.4em;
@@ -126,33 +126,33 @@
     font-size: 0.85em;
 }
 
-.st-message-mangler-settings .st_mangler_trigger_row {
+.st_mangler_trigger_row {
     display: block;
     margin: 0.35em 0;
 }
 
-.st-message-mangler-settings .st_mangler_trigger_row input:not([type="checkbox"]),
-.st-message-mangler-settings .st_mangler_trigger_row select {
+.st_mangler_trigger_row input:not([type="checkbox"]),
+.st_mangler_trigger_row select {
     display: block;
     margin-top: 0.15em;
 }
 
-.st-message-mangler-settings .st_mangler_trigger_row input[type="checkbox"] {
+.st_mangler_trigger_row input[type="checkbox"] {
     vertical-align: middle;
     margin-right: 0.3em;
 }
 
-.st-message-mangler-settings .st_mangler_checkbox_row {
+.st_mangler_checkbox_row {
     align-items: center;
     gap: 0.3em;
 }
 
-.st-message-mangler-settings .st_mangler_checkbox_row input[type="checkbox"] {
+.st_mangler_checkbox_row input[type="checkbox"] {
     flex: 0 0 auto;
     margin: 0;
 }
 
-.st-message-mangler-settings .st_mangler_trigger_section_header {
+.st_mangler_trigger_section_header {
     margin-top: 0.6em;
     padding-top: 0.4em;
     border-top: 1px dashed var(--SmartThemeBorderColor, #666);
@@ -163,14 +163,34 @@
     opacity: 0.65;
 }
 
-.st-message-mangler-settings .st_mangler_trigger_section_header:first-child {
+.st_mangler_trigger_section_header:first-child {
     margin-top: 0;
     padding-top: 0;
     border-top: none;
 }
 
-.st-message-mangler-settings #st_mangler_effects {
-    max-height: 50vh;
+/* Force the popup itself wide enough for two 480px-min columns side by side (control rows in
+   both Trackers and Effects need to fit on one line) — the built-in wide/wider/large presets cap
+   out at 750px min-width, not enough for this layout. */
+.popup:has(.st_mangler_modal_columns) {
+    width: min(96vw, 1300px) !important;
+    max-width: 96vw !important;
+}
+
+.st_mangler_modal_columns {
+    display: flex;
+    gap: 1em;
+    align-items: flex-start;
+}
+
+.st_mangler_modal_columns > div {
+    flex: 1 1 0;
+    min-width: 480px;
+}
+
+.st_mangler_modal_columns #st_mangler_trackers,
+.st_mangler_modal_columns #st_mangler_effects {
+    max-height: 70vh;
     overflow-y: auto;
 }
 

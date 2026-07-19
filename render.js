@@ -1,11 +1,11 @@
 import {
     getTrackerLevel, getTrackerTurnsActive, getTrackerLocked, trackerStatusBadgeHtml, describeDependencyState,
 } from './lib/chatState.js';
-import { escapeHtmlForDisplay, resolveEffectTracker } from './lib/pure.js';
+import { resolveEffectTracker } from './lib/pure.js';
 import {
     infoIcon, field, renderRowIdentity, renderTriggerPanel, renderTrackerBasicsPanel, renderDependencyPanel,
     renderTrackerTestPanel, renderTrackerPickerField, renderTypeFields, renderTestPanel, renderRulesPanel,
-    EFFECT_TYPE_LABELS, EFFECT_TABS, TRACKER_TABS,
+    dependencyWarningIconHtml, EFFECT_TYPE_LABELS, EFFECT_TABS, TRACKER_TABS,
 } from './lib/render.js';
 
 // Session-only (not persisted to settings) — which tracker/effect rows are currently expanded and
@@ -31,7 +31,7 @@ export function renderTrackerRow(tracker, allTrackers = [tracker]) {
             <div class="flex-container alignItemsCenter st_mangler_effect_header">
                 ${renderRowIdentity('st_mangler_tracker_toggle', expanded, tracker.enabled, tracker.label, 'Tracker label — also how this tracker is referenced in a cue macro, e.g. {{level:' + (tracker.label || '...') + '}}')}
                 <span class="st_mangler_effect_summary_type">${tracker.mode === 'progressive' ? `Progressive (${tracker.detector})` : 'Always'}</span>
-                ${dependencyState ? `<i class="fa-solid fa-triangle-exclamation st_mangler_dependency_warning" title="${escapeHtmlForDisplay(dependencyState.reason)}"></i>` : ''}
+                <span class="st_mangler_dependency_warning_slot" data-tracker-id="${tracker.id}">${dependencyWarningIconHtml(dependencyState)}</span>
                 ${trackerStatusBadgeHtml(tracker)}
                 <div class="menu_button menu_button_icon st_mangler_tracker_move_up" title="Move up"><i class="fa-solid fa-arrow-up"></i></div>
                 <div class="menu_button menu_button_icon st_mangler_tracker_move_down" title="Move down"><i class="fa-solid fa-arrow-down"></i></div>
