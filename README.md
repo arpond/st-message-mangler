@@ -732,6 +732,17 @@ seeing one of these, this is likely why.
   snapshot from the message you forked from (there's no per-message level history to copy from).
   Every tracker's level/turns-active/locked state now resets once, automatically, the first time
   a freshly forked chat is opened.
+- **A rule/effect gated on an LLM-classification tracker doesn't react to that tracker's own hit
+  until the message *after* the one that triggered it**, even though detection and rewrite calls
+  get serialized (see above) so they never run concurrently. Serializing only stops the two calls
+  from overlapping — it doesn't make the freshly-rated level visible to that same message's own
+  rule/effect gating, which already ran off the level from *before* the rating came back. This is
+  working as intended, the same one-message lag a Tracker's own auto awareness cue already has.
+- **Two Effect Rules both fire together even though one condition looks like it should "win" over
+  the other.** Only true under **Stack all matches** — it joins every rule whose conditions are
+  individually satisfied, with no "more specific rule wins" behavior. If two rules should be
+  mutually exclusive, either use **First match wins** (list order gives the earlier rule
+  priority) or make the broader rule's own conditions genuinely exclude the stricter one's case.
 
 ## How it works
 
