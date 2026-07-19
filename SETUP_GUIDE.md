@@ -207,3 +207,54 @@ stays inert until `Faith seed` clears `0.4`, then starts actually reshaping dial
 the first time the model rates an explicit profession of faith at `7+` — at which point its own
 awareness cue takes over and the character keeps acting converted turn after turn without needing
 to be re-detected each time.
+
+## 4. Layering on top: Rules, Tracker auto-cues, and Character awareness
+
+Three more tools, demonstrated on top of the Faith example above rather than as a fresh build —
+none of these need you to touch `Faith seed`/`Doubt cracks`/`Public devotion`'s existing
+Basics/Trigger tabs from section 3.
+
+### Rules: reacting to combinations of Trackers directly on the Effect
+
+`Doubt cracks` currently gates via its own **Tracker → Dependency** tab (step 5). The same
+condition can instead live on the **Effect**'s own **Rules** tab, alongside a different
+instruction per combination:
+
+1. Open the `Doubt cracks` **Effect → Rules** tab. **Scaling** should already be `Structured
+   steps` from step 7 — leave it.
+2. Leave **Ruling mode** at `First match wins`.
+3. Click **Add rule**, add one condition: tracker `Faith seed`, **Min level** `0.4`. This rule's
+   own step ladder (add the same three steps from step 7) is used instead of the effect-level
+   ladder once any rule exists.
+4. Click **Add rule** again with *no condition at all* — a rule with zero conditions always
+   matches, so placed last it acts as an "otherwise" fallback (text: `dialogue reads as openly
+   skeptical of the old faith`, matching what the effect-level ladder's `0.00` step said). Rules
+   are checked in list order, so this covers "`Faith seed` hasn't cleared `0.4` yet" without a
+   separate Dependency entry — you can remove the Tracker → Dependency entry from step 5 now, or
+   leave both (whichever gate is stricter wins in practice).
+
+To see **Stack all matches** actually stack, switch **Ruling mode** to it and add a second rule:
+condition on `Doubt cracks`' *own* tracker at Min level `0.6`, text `starting to speak of faith
+unprompted`. Once both this rule's condition and the `Faith seed` rule's condition are met, **both
+rules' text get joined** into one instruction — `Stack` has no "more specific rule wins" behavior,
+unlike `First match wins`'s list-order priority (see `README.md`'s Troubleshooting section if two
+stacked rules should have been mutually exclusive instead).
+
+### Tracker auto-cue: reporting a number without an Effect
+
+`Faith seed`'s effect already hand-writes a Basics-tab **Live awareness cue** (step 2) to report
+its tracker's state. The same report, without an Effect at all: open the `Faith seed`
+**Tracker → Basics** tab, check **Auto awareness cue**, and optionally **Describe what triggers
+it** (pulls in the Trigger tab's Condition to detect text). This injects a fixed-format
+`"Faith seed ({{user}}): NN% (trend)"` line whenever the tracker is past its Min level to apply —
+useful for a tracker you don't want to write prose for by hand.
+
+### Character awareness: one number across every tracker in this guide
+
+Above the Trackers list in the main settings panel is a **Character awareness** section — on by
+default, but inert until its step ladder has text. Give it a step (e.g. threshold `0.3`:
+`[System: {{char}} is starting to sense something is different tonight.]`) and it rises by a flat
+amount whenever *any* tracker — `Faith seed`, `Doubt cracks`, `Public devotion`, `Poison`,
+`Stamina`, everything configured across this whole guide — registers a hit, independent of any one
+tracker's own level. Useful for a general "the character is picking up on *something*" signal
+without wiring every tracker's own cue into one shared prompt by hand.
