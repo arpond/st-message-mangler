@@ -3,6 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test"
+    "test": "node --test test/pure.test.js test/render.test.js",
+    "test:ui": "playwright test -c test/ui"
+  },
+  "devDependencies": {
+    "jquery": "^4.0.0",
+    "playwright": "^1.61.1"
   }
 }

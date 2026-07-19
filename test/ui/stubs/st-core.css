@@ -1,0 +1,33 @@
+/* Minimal recreation of the handful of SillyTavern *core* CSS classes this extension's markup
+   assumes exist (`.menu_button`, `.flex-container`, `.alignItemsCenter`, `.text_pole`,
+   `.checkbox_label`) — real ST provides these globally; this fixture doesn't load the real
+   theme, so buttons/rows would otherwise collapse to zero size and be unclickable in a headless
+   browser. Not a faithful recreation, just enough box model for this smoke test to interact with
+   the real markup/style.css the same way a user's mouse would. */
+.menu_button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.2em 0.6em;
+    cursor: pointer;
+    min-height: 1.6em;
+}
+
+.flex-container {
+    display: flex;
+    flex-wrap: wrap;
+}
+
+.alignItemsCenter {
+    align-items: center;
+}
+
+.text_pole {
+    padding: 0.2em 0.4em;
+}
+
+.checkbox_label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3em;
+}

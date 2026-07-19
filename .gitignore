@@ -1,3 +1,7 @@
 IMPROVEMENT_TRACKER.md
 DEVELOPMENT.md
 CLAUDE.local.md
+node_modules/
+test/ui/.fixture/
+test-results/
+playwright-report/

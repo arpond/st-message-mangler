@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <title>st-message-mangler UI smoke test harness</title>
+    <link rel="stylesheet" href="./st-core.css" />
+    <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+    <!-- Stand-ins for the real SillyTavern page regions this extension writes into. -->
+    <div id="extensions_settings"></div>
+    <div id="extensionsMenu"></div>
+    <div id="movingDivs"></div>
+
+    <script src="../../../../jquery.min.js"></script>
+    <script src="./sillytavern-context.js"></script>
+    <script type="module" src="./index.js"></script>
+</body>
+</html>

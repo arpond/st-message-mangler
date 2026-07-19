@@ -11,9 +11,15 @@ SillyTavern; no build step, no bundler, zero runtime dependencies.
 
 ## Commands
 
-- `npm test` — runs `node --test` over `test/pure.test.js`. The only command that exists; there is
-  no build or lint.
+- `npm test` — runs `node --test` over `test/pure.test.js`/`test/render.test.js` (explicit paths,
+  not auto-discovery — `test/ui/` holds a separate Playwright-based check, see below, that would
+  otherwise get swept in since it also lives under `test/`). No build or lint step.
 - Single test: `node --test --test-name-pattern="<name>" test/pure.test.js`
+- `npm run test:ui` — a thin, manually-run Playwright smoke test for the settings-panel UI (opens
+  the Trackers/Effects modal in a headless browser against a stubbed SillyTavern runtime). Not
+  part of `npm test`, not run in CI. Run it before committing a change touching
+  `settingsUI.js`/`render.js`/`lib/render.js`/`style.css` — see DEVELOPMENT.md's Tests section for
+  what it covers and why it's separate.
 
 ## Deploying / running against real SillyTavern
 
