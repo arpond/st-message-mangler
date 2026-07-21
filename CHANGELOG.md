@@ -4,6 +4,14 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v44
+
+- **Warn when many `llm-rewrite` effects are active at once** — unlike detection (batched into one
+  call), each active `llm-rewrite` effect is its own sequential, awaited LLM call. A soft console
+  warning now fires after any message where 3+ rewrite effects actually ran, naming the count and
+  flagging the latency (not just cost — `maxLlmCallsPerMessage` already caps that) implication.
+  No new setting; not a hard limit.
+
 ## v43
 
 - **Internal cleanup — no behavior change.** Follow-up from a full-repo duplication audit: added

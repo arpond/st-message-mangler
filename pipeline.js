@@ -16,6 +16,10 @@ import {
     resolveGlobalAwarenessHit, resolveGlobalAwarenessDecay,
 } from './lib/pure.js';
 
+// Soft latency warning, not a hard cap (maxLlmCallsPerMessage already caps total LLM calls/cost) —
+// see the activeRewriteCount comment in applyEffects' Phase B.
+const MANY_ACTIVE_REWRITES_WARNING_THRESHOLD = 3;
+
 // Gates which hook is allowed to update a tracker's level — 'user' for onMessageSent,
 // 'character' for onCharacterMessageRendered. Applies to both detector types identically;
 // it's about whose turn counts as evidence, not how that evidence is judged.
@@ -377,6 +381,12 @@ export async function applyEffects(originalText, message, settings, source, isCo
 
     // --- Phase B: walk Effects in list order, each consuming its Tracker's resolved level ---
     let text = originalText;
+    // Unlike detection (batched into one call), each active llm-rewrite effect below is its own
+    // sequential, awaited generateRaw round-trip — maxLlmCallsPerMessage already hard-caps the
+    // total, but that's a cost cap, not a latency warning. Counted here and checked once after the
+    // loop (not warned inline per-effect) so the message names how many actually stacked up this
+    // turn, not just that a second one started.
+    let activeRewriteCount = 0;
     for (const effect of settings.effects) {
         const tracker = trackerById.get(effect.trackerId);
         if (!tracker) {
@@ -443,6 +453,7 @@ export async function applyEffects(originalText, message, settings, source, isCo
                 continue;
             }
             budget.remaining--;
+            activeRewriteCount++;
             debugLog(`applyEffects: "${effect.label}" (llm-rewrite) proceeding at level=${level.toFixed(2)}, budget remaining after=${budget.remaining}`);
         } else {
             debugLog(`applyEffects: "${effect.label}" (${effect.type}) proceeding at level=${level.toFixed(2)}`);
@@ -450,6 +461,9 @@ export async function applyEffects(originalText, message, settings, source, isCo
         const before = text;
         text = await applySingleEffect(text, effect, level, originalText, respondingTo, recentMessages, ruleText, ruleAmount, tracker.hitDirection);
         debugLog(`applyEffects: "${effect.label}" ${text === before ? 'made no change' : 'changed the text'}.`);
+    }
+    if (activeRewriteCount >= MANY_ACTIVE_REWRITES_WARNING_THRESHOLD) {
+        warn(`${activeRewriteCount} llm-rewrite effects were active this message — each is a sequential, awaited LLM call, so this message's reply is waiting on ${activeRewriteCount}x the latency of one. Consider consolidating or gating some behind stricter conditions.`);
     }
     debugLog(`applyEffects: done — text ${text === originalText ? 'unchanged overall' : 'was rewritten overall'}.`);
     return text;
