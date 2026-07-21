@@ -4,6 +4,56 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v42
+
+- **Status panel: grouped by trigger, not by effect** — the floating status panel now lists each
+  Tracker once (with its live level badge, active-in-chat toggle, character binding, level-set
+  input, and a new **dispel now** button that resets it to its resting level and clears turns
+  active/locked), with the enabled effects that use it nested underneath — and for any effect with
+  rules, which rule currently matches its tracker's live level. Previously it listed one row per
+  effect, which duplicated a shared tracker's controls across every effect using it (toggling
+  "active" on one row silently changed every other effect sharing that tracker, with no indication
+  that's what happened) and never showed which rule an `llm-rewrite` effect would actually apply.
+- **Creative freedom — a second, level-laddered axis, separate from Scaling/Instruction text** —
+  Rules and the Rules-tab default now also carry a **Creative freedom** ladder (threshold + preset
+  rows: `(none)`/Light/Moderate/Heavy/Complete rewrite, same picking logic as Structured steps),
+  exposed to an `llm-rewrite` effect's prompt template as its own `{{amount_instruction}}`
+  placeholder, alongside the existing `{{scale_instruction}}`. Splits "how much license the model
+  has to deviate" (a fixed built-in preset per level, not authored prose) from "how to write the
+  change" (the existing flat text/step ladder) — previously both had to be crammed into one prose
+  field. Same "rules take over once present" precedent as the rest of the Rules tab: the
+  effect-level ladder applies while no rules exist, each rule's own ladder entirely replaces it
+  once rules are configured. Hidden for `regex`/`drunk`/`none` effects, same as Instruction
+  text/Step ladder. (Shipped this session first as a single flat "Amount" preset with no per-level
+  variation, then reworked into a ladder and renamed before release — see DEVELOPMENT.md.)
+- **Rules: collapsible, nameable, duplicatable** — each rule row now collapses to one line (same
+  chevron convention as effect/tracker rows), has an optional cosmetic **label** shown in its
+  header instead of a bare "Rule N", and a duplicate button that clones a rule (conditions, text,
+  steps, Creative freedom ladder, cue — everything) directly after the original.
+- **Ladder tracker — per-rule override for which tracker a rule's ladders measure against** — a
+  rule's Step ladder/Creative freedom previously always measured against this effect's own primary
+  tracker even when the rule's own conditions named a different one, which read as ambiguous. Each
+  rule now has a **Ladder tracker** picker (defaults to the primary tracker, unchanged behavior)
+  letting it ladder against any tracker instead — `{{level}}`/`{{level_pct}}`/`{{trend}}`
+  substitution, this rule's conditions, and chat-activation/character-binding stay on the primary
+  tracker regardless.
+- **Fix: every threshold (Min/Max level to apply, Lock threshold, rule condition minLevel,
+  Structured-steps/Creative-freedom ladders) now means a literal target level, checked from
+  whichever side Hit direction points at** — for a decreasing tracker (rests near 1, drops toward
+  0 on a hit), a threshold is reached once the level has fallen *to or below* it (`level <=
+  threshold`), the same number you'd enter for an increasing tracker, just compared the other way.
+  A ladder's step-picking flips to match: the *smallest* reached threshold wins for a decreasing
+  tracker (largest still wins for increasing), so more extreme steps still take priority as the
+  level keeps dropping. "Min level to apply" relabels to **"Max level to apply"** for a decreasing
+  tracker (it's a ceiling now, not a minimum-drop-amount). A visible note above any ladder whose
+  tracker decreases explains this. No settings change needed; increasing trackers are unaffected.
+- **Fix: `lockThreshold: 0` locked a cumulative-lock tracker immediately at rest, before any hit** —
+  locking now additionally requires an actual hit on that same call, so `lockThreshold: 0` no
+  longer fires on the very first evaluation regardless of whether anything had happened yet. For a
+  decreasing tracker specifically, `lockThreshold: 0` now means "lock only once the level has
+  dropped all the way to 0" (the strictest possible bar, matching the point above), not "lock
+  immediately."
+
 ## v41
 
 - **Trackers & Effects moved into a wide modal** — a new **Configure Trackers & Effects** button

@@ -17,6 +17,11 @@ export const expandedTrackerIds = new Set();
 export const trackerActiveTab = new Map();
 export const expandedEffectIds = new Set();
 export const effectActiveTab = new Map();
+// Opt-out (not opt-in) unlike the two Sets above: a rule not in this Set renders expanded by
+// default, so a newly added/duplicated rule needs no explicit "add to expanded" call the way
+// expandedEffectIds does for new effects — the common case (a handful of rules per effect) stays
+// fully visible without the user having to expand anything.
+export const collapsedRuleIds = new Set();
 
 export function renderTrackerRow(tracker, allTrackers = [tracker]) {
     const expanded = expandedTrackerIds.has(tracker.id);
@@ -125,7 +130,7 @@ export function renderEffectRow(effect, allTrackers = []) {
                         Level cap sent to model${infoIcon('Some models read the literal maximum {{level}}=1.00/{{level_pct}}=100 as "weak" rather than maximum. This caps what gets substituted into those placeholders (in the llm-rewrite template and the awareness cue) just short of the ceiling — the real level used for trigger/threshold logic elsewhere is untouched. Set to 1 to disable if your model doesn\'t have this quirk.')}
                         ${field('number', 'promptLevelCap', effect.promptLevelCap, 'min="0" max="1" step="0.01" style="max-width: 5em;"')}
                     </label>`)}
-                ${pane('rules', renderRulesPanel(effect, allTrackers))}
+                ${pane('rules', renderRulesPanel(effect, allTrackers, collapsedRuleIds))}
                 ${effect.type === 'none' ? '' : pane('behavior', renderTypeFields(effect))}
                 ${pane('test', renderTestPanel(effect))}
             </div>

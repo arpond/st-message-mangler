@@ -13,7 +13,8 @@ import {
     resolveChatActiveState, resolveBindableCharacters, restingLevelValue, meetsDirectionalThreshold,
     resolveHitLevel, migrateEffectDependency, resolveLlmMagnitudeScale, resolveEffectTracker,
     defaultRule, resolveRuleOutput, sanitizeRules, buildTrackerAutoCueTemplate,
-    resolveGlobalAwarenessHit, resolveGlobalAwarenessDecay,
+    resolveGlobalAwarenessHit, resolveGlobalAwarenessDecay, AMOUNT_PRESETS,
+    resolveAmountStep, sanitizeAmountSteps, migrateAmountToSteps,
 } from '../lib/pure.js';
 
 test('clamp01 clamps to [0, 1]', () => {
@@ -526,6 +527,50 @@ test('resolveScaleStep works with unsorted step input', () => {
     assert.equal(resolveScaleStep(steps, 0.5), 'low');
 });
 
+test('resolveScaleStep defaults to increase (raw level) when hitDirection is omitted, unchanged behavior', () => {
+    const steps = [{ threshold: 0, text: 'none' }, { threshold: 0.7, text: 'high' }];
+    assert.equal(resolveScaleStep(steps, 0.9), 'high');
+});
+
+test('resolveScaleStep for a decreasing tracker: threshold is a literal target level, tightest (smallest) reached one wins', () => {
+    // hitDirection: 'decrease' rests near 1 and escalates toward 0 — a step's threshold is checked
+    // via meetsDirectionalThreshold, i.e. "reached" once level <= threshold. As level drops, MORE
+    // thresholds become reached, largest first, so the smallest reached threshold is the tightest
+    // (most-escalated) one authored — 'mild' at 0.8 fires easily/early; 'intense' at 0.2 requires a
+    // much bigger drop.
+    const steps = [{ threshold: 0.8, text: 'mild' }, { threshold: 0.2, text: 'intense' }];
+    assert.equal(resolveScaleStep(steps, 0.9, 'decrease'), ''); // hasn't dropped far enough for even 0.8 yet
+    assert.equal(resolveScaleStep(steps, 0.7, 'decrease'), 'mild'); // 0.8 reached, 0.2 not yet
+    assert.equal(resolveScaleStep(steps, 0.1, 'decrease'), 'intense'); // both reached — smallest (tightest) wins
+});
+
+test('resolveAmountStep returns empty string with no steps', () => {
+    assert.equal(resolveAmountStep([], 0.5), '');
+});
+
+test('resolveAmountStep returns empty string when level is below every threshold', () => {
+    const steps = [{ threshold: 0.3, amount: 'light' }, { threshold: 0.7, amount: 'heavy' }];
+    assert.equal(resolveAmountStep(steps, 0.1), '');
+});
+
+test('resolveAmountStep picks the highest threshold <= level, resolved through AMOUNT_PRESETS', () => {
+    const steps = [{ threshold: 0, amount: 'light' }, { threshold: 0.7, amount: 'heavy' }];
+    assert.equal(resolveAmountStep(steps, 0.5), AMOUNT_PRESETS.light);
+    assert.equal(resolveAmountStep(steps, 0.9), AMOUNT_PRESETS.heavy);
+});
+
+test('resolveAmountStep returns empty string when the matched step has no preset set', () => {
+    const steps = [{ threshold: 0, amount: '' }];
+    assert.equal(resolveAmountStep(steps, 0.5), '');
+});
+
+test('resolveAmountStep for a decreasing tracker: threshold is a literal target level, same picking logic as resolveScaleStep', () => {
+    const steps = [{ threshold: 0.8, amount: 'light' }, { threshold: 0.2, amount: 'heavy' }];
+    assert.equal(resolveAmountStep(steps, 0.9, 'decrease'), '');
+    assert.equal(resolveAmountStep(steps, 0.7, 'decrease'), AMOUNT_PRESETS.light);
+    assert.equal(resolveAmountStep(steps, 0.1, 'decrease'), AMOUNT_PRESETS.heavy);
+});
+
 test('splitContinuationSuffix treats a fresh message (no prior snapshot) as not a continuation', () => {
     const result = splitContinuationSuffix('Hello there.', undefined);
     assert.equal(result.isContinuation, false);
@@ -646,6 +691,63 @@ test('sanitizeScaleSteps does not warn when thresholds are legitimately distinct
     assert.equal(warnings.length, 0);
 });
 
+test('sanitizeAmountSteps resets a non-finite threshold to 0 and warns', () => {
+    const steps = [{ threshold: 'bad', amount: 'light' }];
+    const warnings = [];
+    sanitizeAmountSteps(steps, (...args) => warnings.push(args));
+    assert.equal(steps[0].threshold, 0);
+    assert.equal(warnings.length, 1);
+});
+
+test('sanitizeAmountSteps clamps out-of-range thresholds into [0, 1]', () => {
+    const steps = [{ threshold: -1, amount: '' }, { threshold: 5, amount: '' }];
+    sanitizeAmountSteps(steps, () => {});
+    assert.equal(steps[0].threshold, 0);
+    assert.equal(steps[1].threshold, 1);
+});
+
+test('sanitizeAmountSteps coerces a non-string amount to an empty string', () => {
+    const steps = [{ threshold: 0.5, amount: null }];
+    sanitizeAmountSteps(steps, () => {});
+    assert.equal(steps[0].amount, '');
+});
+
+test('sanitizeAmountSteps resets an unrecognized amount preset and warns', () => {
+    const steps = [{ threshold: 0.5, amount: 'extreme' }];
+    const warnings = [];
+    sanitizeAmountSteps(steps, (...args) => warnings.push(args));
+    assert.equal(steps[0].amount, '');
+    assert.equal(warnings.length, 1);
+});
+
+test('sanitizeAmountSteps warns on duplicate thresholds without changing values', () => {
+    const steps = [{ threshold: 0.5, amount: 'light' }, { threshold: 0.5, amount: 'heavy' }];
+    const warnings = [];
+    sanitizeAmountSteps(steps, (...args) => warnings.push(args));
+    assert.equal(warnings.length, 1);
+});
+
+test('migrateAmountToSteps converts a legacy flat amount string into a single always-active step', () => {
+    const obj = { amount: 'heavy' };
+    migrateAmountToSteps(obj);
+    assert.deepEqual(obj.amountSteps, [{ threshold: 0, amount: 'heavy' }]);
+    assert.equal(obj.amount, undefined);
+});
+
+test('migrateAmountToSteps is a no-op (besides deleting the empty field) when there was nothing to migrate', () => {
+    const obj = { amount: '' };
+    migrateAmountToSteps(obj);
+    assert.equal(obj.amountSteps, undefined);
+    assert.equal(obj.amount, undefined);
+});
+
+test('migrateAmountToSteps does not overwrite an existing amountSteps array', () => {
+    const obj = { amount: 'heavy', amountSteps: [{ threshold: 0.3, amount: 'light' }] };
+    migrateAmountToSteps(obj);
+    assert.deepEqual(obj.amountSteps, [{ threshold: 0.3, amount: 'light' }]);
+    assert.equal(obj.amount, undefined);
+});
+
 test('buildRespondingToContext returns empty string with no preceding message', () => {
     assert.equal(buildRespondingToContext(undefined), '');
     assert.equal(buildRespondingToContext(null), '');
@@ -737,6 +839,64 @@ test('resolveLlmRatingUpdate: cumulative-lock locks once level crosses lockThres
     // Already-locked stays locked even on a non-hit (caller is expected to skip calling this
     // at all once locked, per the doc comment — this just verifies the math doesn't un-lock).
     assert.deepEqual(resolveLlmRatingUpdate(0.9, true, 1, trigger), { level: 0.85, locked: true, hit: false });
+});
+
+test('resolveLlmRatingUpdate (bug repro): lockThreshold 0 for a decreasing tracker requires an actual full drop to 0, not the first hit', () => {
+    // Regression for a real report: a decreasing tracker resting at level 1 with lockThreshold: 0
+    // locked on its very first evaluation, before any actual erosion. Under the current, literal-
+    // target-level reading of threshold, lockThreshold: 0 for a decreasing tracker means "lock only
+    // once level has dropped all the way to 0" — the hardest bar, not the easiest.
+    const trigger = {
+        ...defaultTrackerShape(), llmIntegrationMode: 'cumulative-lock', hitDirection: 'decrease',
+        restingLevel: 'high', llmHitThreshold: 5, incrementPerHit: 0.3, decayPerTurn: 0.05, lockThreshold: 0,
+    };
+    // A no-hit rating at the resting level: level stays at 1, must NOT lock.
+    const atRest = resolveLlmRatingUpdate(1, false, 1, trigger);
+    assert.equal(atRest.level, 1);
+    assert.equal(atRest.locked, false);
+    // A real hit that erodes it, but not all the way to 0, must NOT lock yet either.
+    const partialDrop = resolveLlmRatingUpdate(1, false, 7, trigger);
+    assert.equal(partialDrop.level, 0.7);
+    assert.equal(partialDrop.hit, true);
+    assert.equal(partialDrop.locked, false);
+});
+
+test('resolveLlmRatingUpdate: lockThreshold 0 for a decreasing tracker DOES lock once a hit brings level all the way to 0', () => {
+    const trigger = {
+        ...defaultTrackerShape(), llmIntegrationMode: 'cumulative-lock', hitDirection: 'decrease',
+        restingLevel: 'high', llmHitThreshold: 5, incrementPerHit: 0.3, decayPerTurn: 0.05, lockThreshold: 0,
+    };
+    // Already close to 0 (0.2) — a hit's increment (0.3) clamps the result to exactly 0.
+    const result = resolveLlmRatingUpdate(0.2, false, 7, trigger);
+    assert.equal(result.level, 0);
+    assert.equal(result.hit, true);
+    assert.equal(result.locked, true);
+});
+
+test('resolveLlmRatingUpdate: hit-guard still prevents an instant lock at increase direction\'s own trivial edge (lockThreshold: 0)', () => {
+    const trigger = {
+        ...defaultTrackerShape(), llmIntegrationMode: 'cumulative-lock', hitDirection: 'increase',
+        restingLevel: 'low', llmHitThreshold: 5, incrementPerHit: 0.3, decayPerTurn: 0.05, lockThreshold: 0,
+    };
+    // meetsDirectionalThreshold(0, 0, 'increase') is trivially true — a no-hit call at rest (level
+    // stays 0) must NOT lock; a real hit (any magnitude) DOES.
+    const atRest = resolveLlmRatingUpdate(0, false, 1, trigger);
+    assert.equal(atRest.locked, false);
+    const onHit = resolveLlmRatingUpdate(0, false, 7, trigger);
+    assert.equal(onHit.locked, true);
+});
+
+test('resolveLlmRatingUpdate: hit-guard still prevents an instant lock at decrease direction\'s own trivial edge (lockThreshold: 1)', () => {
+    const trigger = {
+        ...defaultTrackerShape(), llmIntegrationMode: 'cumulative-lock', hitDirection: 'decrease',
+        restingLevel: 'high', llmHitThreshold: 5, incrementPerHit: 0.3, decayPerTurn: 0.05, lockThreshold: 1,
+    };
+    // meetsDirectionalThreshold(1, 1, 'decrease') is trivially true — a no-hit call at rest (level
+    // stays 1) must NOT lock; a real hit (any magnitude) DOES.
+    const atRest = resolveLlmRatingUpdate(1, false, 1, trigger);
+    assert.equal(atRest.locked, false);
+    const onHit = resolveLlmRatingUpdate(1, false, 7, trigger);
+    assert.equal(onHit.locked, true);
 });
 
 test('resolveDetectionLevelUpdate: dispel keyword forces level/turnsActive to 0', () => {
@@ -932,9 +1092,10 @@ test('meetsDirectionalThreshold: increase direction behaves like a plain >= (reg
     assert.equal(meetsDirectionalThreshold(0.49, 0.5, 'increase'), false);
 });
 
-test('meetsDirectionalThreshold: decrease direction mirrors the threshold across 0.5', () => {
-    assert.equal(meetsDirectionalThreshold(0.1, 0.8, 'decrease'), true); // 0.1 <= 1 - 0.8
-    assert.equal(meetsDirectionalThreshold(0.3, 0.8, 'decrease'), false); // 0.3 > 1 - 0.8
+test('meetsDirectionalThreshold: decrease direction behaves like a plain <= against the literal threshold', () => {
+    assert.equal(meetsDirectionalThreshold(0.8, 0.8, 'decrease'), true);
+    assert.equal(meetsDirectionalThreshold(0.81, 0.8, 'decrease'), false);
+    assert.equal(meetsDirectionalThreshold(0.1, 0.8, 'decrease'), true); // well below the threshold — reached
 });
 
 test('resolveHitLevel: increment direction increase nudges up on a hit, decays down otherwise', () => {
@@ -1018,17 +1179,20 @@ test('resolveDetectionLevelUpdate: restingLevel high dispels/no-hit-decays towar
     );
 });
 
-test('resolveLlmRatingUpdate: restingLevel high + decrease direction erodes on a hit, locks via mirrored lockThreshold', () => {
-    const trigger = { ...defaultTrackerShape(), llmIntegrationMode: 'cumulative-lock', restingLevel: 'high', hitDirection: 'decrease', llmHitThreshold: 5, incrementPerHit: 0.3, lockThreshold: 0.8 };
-    assert.deepEqual(resolveLlmRatingUpdate(0.9, false, 7, trigger), { level: 0.9 - 0.3, locked: false, hit: true });
-    assert.deepEqual(resolveLlmRatingUpdate(0.3, false, 7, trigger), { level: 0, locked: true, hit: true });
+test('resolveLlmRatingUpdate: restingLevel high + decrease direction erodes on a hit, locks once level reaches the literal lockThreshold', () => {
+    const trigger = { ...defaultTrackerShape(), llmIntegrationMode: 'cumulative-lock', restingLevel: 'high', hitDirection: 'decrease', llmHitThreshold: 5, incrementPerHit: 0.3, lockThreshold: 0.5 };
+    assert.deepEqual(resolveLlmRatingUpdate(0.9, false, 7, trigger), { level: 0.9 - 0.3, locked: false, hit: true }); // 0.6 > 0.5 — not there yet
+    assert.deepEqual(resolveLlmRatingUpdate(0.3, false, 7, trigger), { level: 0, locked: true, hit: true }); // 0 <= 0.5 — locks
 });
 
 test('defaultRule returns an empty AND-gate with no text, steps, or awarenessCue', () => {
     const rule = defaultRule();
     assert.deepEqual(rule.conditions, []);
+    assert.equal(rule.label, '');
+    assert.equal(rule.levelTrackerId, '');
     assert.equal(rule.text, '');
     assert.deepEqual(rule.steps, []);
+    assert.deepEqual(rule.amountSteps, []);
     assert.equal(rule.awarenessCue, '');
     assert.match(rule.id, /^rule_/);
 });
@@ -1044,7 +1208,7 @@ test('resolveRuleOutput (first-match): picks the first rule whose every conditio
         { conditions: [{ trackerId: 'a', minLevel: 0.5 }], text: 'a only' },
     ];
     const result = resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById);
-    assert.deepEqual(result, { active: true, text: 'a only', cueText: '' });
+    assert.deepEqual(result, { active: true, text: 'a only', cueText: '', amountText: '' });
 });
 
 test('resolveRuleOutput (first-match): a zero-condition rule matches vacuously as a fallback', () => {
@@ -1054,14 +1218,14 @@ test('resolveRuleOutput (first-match): a zero-condition rule matches vacuously a
         { conditions: [{ trackerId: 'a', minLevel: 0.5 }], text: 'a active' },
         { conditions: [], text: 'otherwise' },
     ];
-    assert.deepEqual(resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById), { active: true, text: 'otherwise', cueText: '' });
+    assert.deepEqual(resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById), { active: true, text: 'otherwise', cueText: '', amountText: '' });
 });
 
 test('resolveRuleOutput (first-match): no rule matches -> inactive, empty text', () => {
     const trackerById = new Map([['a', { ...defaultTrackerShape() }]]);
     const resolvedLevels = new Map([['a', { level: 0 }]]);
     const rules = [{ conditions: [{ trackerId: 'a', minLevel: 0.5 }], text: 'a active' }];
-    assert.deepEqual(resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById), { active: false, text: '', cueText: '' });
+    assert.deepEqual(resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById), { active: false, text: '', cueText: '', amountText: '' });
 });
 
 test('resolveRuleOutput (stack): joins every matching rule\'s text, in order, and skips blank ones', () => {
@@ -1084,14 +1248,14 @@ test('resolveRuleOutput: a condition referencing a deleted tracker is dropped, n
     const trackerById = new Map([['a', { ...defaultTrackerShape() }]]);
     const resolvedLevels = new Map([['a', { level: 0.9 }]]);
     const rules = [{ conditions: [{ trackerId: 'a', minLevel: 0.5 }, { trackerId: 'gone', minLevel: 0.9 }], text: 'matched' }];
-    assert.deepEqual(resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById), { active: true, text: 'matched', cueText: '' });
+    assert.deepEqual(resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById), { active: true, text: 'matched', cueText: '', amountText: '' });
 });
 
 test('resolveRuleOutput: hitDirection mirroring applies per-condition, using that condition\'s own tracker', () => {
     const trackerById = new Map([['a', { ...defaultTrackerShape(), hitDirection: 'decrease' }]]);
     const resolvedLevels = new Map([['a', { level: 0.1 }]]); // low level -> "met" for a decrease-direction 0.5 threshold
     const rules = [{ conditions: [{ trackerId: 'a', minLevel: 0.5 }], text: 'eroded' }];
-    assert.deepEqual(resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById), { active: true, text: 'eroded', cueText: '' });
+    assert.deepEqual(resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById), { active: true, text: 'eroded', cueText: '', amountText: '' });
 });
 
 test('resolveRuleOutput (scaleMode=steps): matched rule resolves its own step ladder against level, not its flat text', () => {
@@ -1103,7 +1267,78 @@ test('resolveRuleOutput (scaleMode=steps): matched rule resolves its own step la
         steps: [{ threshold: 0, text: 'mild' }, { threshold: 0.8, text: 'intense' }],
     }];
     const result = resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById, 0.9, 'steps');
-    assert.deepEqual(result, { active: true, text: 'intense', cueText: '' });
+    assert.deepEqual(result, { active: true, text: 'intense', cueText: '', amountText: '' });
+});
+
+test('resolveRuleOutput: a rule with levelTrackerId ladders its steps/amountSteps against that tracker\'s level, not the primary tracker\'s', () => {
+    const trackerById = new Map([['a', { ...defaultTrackerShape() }], ['b', { ...defaultTrackerShape() }]]);
+    // Primary tracker 'a' is at a low level (would resolve to 'mild'/'light'); 'b' — named by
+    // levelTrackerId, not necessarily this rule's own conditions — is high (resolves to
+    // 'intense'/'heavy'). The 4th `level` param below (0.1) simulates the primary tracker's level.
+    const resolvedLevels = new Map([['a', { level: 0.1 }], ['b', { level: 0.9 }]]);
+    const rules = [{
+        conditions: [],
+        levelTrackerId: 'b',
+        steps: [{ threshold: 0, text: 'mild' }, { threshold: 0.8, text: 'intense' }],
+        amountSteps: [{ threshold: 0, amount: 'light' }, { threshold: 0.8, amount: 'heavy' }],
+    }];
+    const result = resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById, 0.1, 'steps');
+    assert.equal(result.text, 'intense');
+    assert.equal(result.amountText, AMOUNT_PRESETS.heavy);
+});
+
+test('resolveRuleOutput: a rule with a dangling/unresolved levelTrackerId falls back to the primary tracker\'s level', () => {
+    const trackerById = new Map([['a', { ...defaultTrackerShape() }]]);
+    const resolvedLevels = new Map([['a', { level: 0.9 }]]);
+    const rules = [{
+        conditions: [],
+        levelTrackerId: 'gone',
+        steps: [{ threshold: 0, text: 'mild' }, { threshold: 0.8, text: 'intense' }],
+    }];
+    const result = resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById, 0.9, 'steps');
+    assert.equal(result.text, 'intense');
+});
+
+test('resolveRuleOutput: an unset levelTrackerId (default) ladders against the primary tracker\'s level', () => {
+    const trackerById = new Map([['a', { ...defaultTrackerShape() }]]);
+    const resolvedLevels = new Map([['a', { level: 0.9 }]]);
+    const rules = [{
+        conditions: [],
+        levelTrackerId: '',
+        steps: [{ threshold: 0, text: 'mild' }, { threshold: 0.8, text: 'intense' }],
+    }];
+    const result = resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById, 0.9, 'steps');
+    assert.equal(result.text, 'intense');
+});
+
+test('resolveRuleOutput: unset levelTrackerId mirrors the PRIMARY tracker\'s hitDirection (via primaryHitDirection param)', () => {
+    const trackerById = new Map([['a', { ...defaultTrackerShape(), hitDirection: 'decrease' }]]);
+    const resolvedLevels = new Map([['a', { level: 0.2 }]]); // heavily escalated for a decrease tracker
+    const rules = [{
+        conditions: [],
+        levelTrackerId: '',
+        steps: [{ threshold: 0, text: 'mild' }, { threshold: 0.7, text: 'intense' }],
+    }];
+    const result = resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById, 0.2, 'steps', 'decrease');
+    assert.equal(result.text, 'intense');
+});
+
+test('resolveRuleOutput: a set levelTrackerId mirrors THAT tracker\'s own hitDirection, not the primary\'s', () => {
+    const trackerById = new Map([
+        ['primary', { ...defaultTrackerShape(), hitDirection: 'increase' }],
+        ['other', { ...defaultTrackerShape(), hitDirection: 'decrease' }],
+    ]);
+    // Primary tracker level (5th param, 0.5) is irrelevant to this rule's ladder — it ladders
+    // against 'other' instead, which is heavily escalated (low raw level, decrease direction).
+    const resolvedLevels = new Map([['primary', { level: 0.5 }], ['other', { level: 0.1 }]]);
+    const rules = [{
+        conditions: [],
+        levelTrackerId: 'other',
+        steps: [{ threshold: 0, text: 'mild' }, { threshold: 0.8, text: 'intense' }],
+    }];
+    // primaryHitDirection ('increase') must NOT apply to this rule's ladder, since it overrides to 'other'.
+    const result = resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById, 0.5, 'steps', 'increase');
+    assert.equal(result.text, 'intense');
 });
 
 test('resolveRuleOutput (scaleMode=steps, stack): each matching rule resolves its own ladder before joining', () => {
@@ -1122,7 +1357,7 @@ test('resolveRuleOutput defaults to freeform scaleMode when not passed (back-com
     const trackerById = new Map([['a', { ...defaultTrackerShape() }]]);
     const resolvedLevels = new Map([['a', { level: 0.9 }]]);
     const rules = [{ conditions: [{ trackerId: 'a', minLevel: 0.5 }], text: 'flat text', steps: [{ threshold: 0, text: 'should be ignored' }] }];
-    assert.deepEqual(resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById), { active: true, text: 'flat text', cueText: '' });
+    assert.deepEqual(resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById), { active: true, text: 'flat text', cueText: '', amountText: '' });
 });
 
 test('resolveRuleOutput (first-match): matched rule\'s cueText is independent of its text/steps', () => {
@@ -1134,7 +1369,7 @@ test('resolveRuleOutput (first-match): matched rule\'s cueText is independent of
         awarenessCue: 'she notices the fear',
     }];
     const result = resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById);
-    assert.deepEqual(result, { active: true, text: 'scale instruction text', cueText: 'she notices the fear' });
+    assert.deepEqual(result, { active: true, text: 'scale instruction text', cueText: 'she notices the fear', amountText: '' });
 });
 
 test('resolveRuleOutput (stack): joins every matching rule\'s cueText, skipping blanks, same as text', () => {
@@ -1158,6 +1393,37 @@ test('resolveRuleOutput: cueText defaults to empty string for a rule with no awa
     assert.equal(result.cueText, '');
 });
 
+test('resolveRuleOutput (first-match): matched rule\'s amountText resolves its amountSteps ladder against level, independent of text/steps', () => {
+    const trackerById = new Map([['a', { ...defaultTrackerShape() }]]);
+    const resolvedLevels = new Map([['a', { level: 0.9 }]]);
+    const rules = [{
+        conditions: [{ trackerId: 'a', minLevel: 0.5 }],
+        text: 'style text',
+        amountSteps: [{ threshold: 0, amount: 'light' }, { threshold: 0.8, amount: 'heavy' }],
+    }];
+    const result = resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById, 0.9);
+    assert.equal(result.amountText, AMOUNT_PRESETS.heavy);
+});
+
+test('resolveRuleOutput: amountText defaults to empty string for a rule with no amountSteps set', () => {
+    const trackerById = new Map([['a', { ...defaultTrackerShape() }]]);
+    const resolvedLevels = new Map([['a', { level: 0.9 }]]);
+    const rules = [{ conditions: [], text: 'matched' }];
+    const result = resolveRuleOutput(rules, 'first-match', resolvedLevels, trackerById);
+    assert.equal(result.amountText, '');
+});
+
+test('resolveRuleOutput (stack): amountText takes the first matched rule\'s resolved ladder step, not joined with the rest', () => {
+    const trackerById = new Map([['a', { ...defaultTrackerShape() }], ['b', { ...defaultTrackerShape() }]]);
+    const resolvedLevels = new Map([['a', { level: 0.9 }], ['b', { level: 0.9 }]]);
+    const rules = [
+        { conditions: [{ trackerId: 'a', minLevel: 0.5 }], text: '', amountSteps: [{ threshold: 0, amount: 'light' }] },
+        { conditions: [{ trackerId: 'b', minLevel: 0.5 }], text: '', amountSteps: [{ threshold: 0, amount: 'complete' }] },
+    ];
+    const result = resolveRuleOutput(rules, 'stack', resolvedLevels, trackerById, 0.9);
+    assert.equal(result.amountText, AMOUNT_PRESETS.light);
+});
+
 test('sanitizeRules resets a non-finite condition minLevel to 0.5 and warns', () => {
     const rules = [{ conditions: [{ trackerId: 'a', minLevel: 'bad' }], text: '' }];
     const warnings = [];
@@ -1178,10 +1444,67 @@ test('sanitizeRules coerces a non-string rule text to an empty string', () => {
     assert.equal(rules[0].text, '');
 });
 
+test('sanitizeRules coerces a non-string rule label to an empty string, without warning', () => {
+    const rules = [{ conditions: [], text: '', label: 42 }];
+    const warnings = [];
+    sanitizeRules(rules, (...args) => warnings.push(args));
+    assert.equal(rules[0].label, '');
+    assert.equal(warnings.length, 0);
+});
+
+test('sanitizeRules defaults a missing rule levelTrackerId to an empty string, without warning', () => {
+    const rules = [{ conditions: [], text: '' }];
+    const warnings = [];
+    sanitizeRules(rules, (...args) => warnings.push(args));
+    assert.equal(rules[0].levelTrackerId, '');
+    assert.equal(warnings.length, 0);
+});
+
+test('sanitizeRules keeps a valid rule levelTrackerId unchanged', () => {
+    const rules = [{ conditions: [], text: '', levelTrackerId: 'tracker_123' }];
+    sanitizeRules(rules, () => {});
+    assert.equal(rules[0].levelTrackerId, 'tracker_123');
+});
+
+test('sanitizeRules keeps a valid rule label unchanged', () => {
+    const rules = [{ conditions: [], text: '', label: 'Fear spike' }];
+    sanitizeRules(rules, () => {});
+    assert.equal(rules[0].label, 'Fear spike');
+});
+
 test('sanitizeRules coerces a non-string rule awarenessCue to an empty string', () => {
     const rules = [{ conditions: [], text: '', awarenessCue: 42 }];
     sanitizeRules(rules, () => {});
     assert.equal(rules[0].awarenessCue, '');
+});
+
+test('sanitizeRules defaults a missing rule amountSteps to an empty array', () => {
+    const rules = [{ conditions: [], text: '' }];
+    const warnings = [];
+    sanitizeRules(rules, (...args) => warnings.push(args));
+    assert.deepEqual(rules[0].amountSteps, []);
+    assert.equal(warnings.length, 0);
+});
+
+test('sanitizeRules resets an unrecognized amount-step preset to unset and warns', () => {
+    const rules = [{ conditions: [], text: '', amountSteps: [{ threshold: 0.5, amount: 'extreme' }] }];
+    const warnings = [];
+    sanitizeRules(rules, (...args) => warnings.push(args));
+    assert.equal(rules[0].amountSteps[0].amount, '');
+    assert.equal(warnings.length, 1);
+});
+
+test('sanitizeRules keeps a valid amount-step preset unchanged', () => {
+    const rules = [{ conditions: [], text: '', amountSteps: [{ threshold: 0.5, amount: 'heavy' }] }];
+    sanitizeRules(rules, () => {});
+    assert.equal(rules[0].amountSteps[0].amount, 'heavy');
+});
+
+test('sanitizeRules migrates a legacy flat rule.amount string into a single always-active amountSteps entry', () => {
+    const rules = [{ conditions: [], text: '', amount: 'heavy' }];
+    sanitizeRules(rules, () => {});
+    assert.deepEqual(rules[0].amountSteps, [{ threshold: 0, amount: 'heavy' }]);
+    assert.equal(rules[0].amount, undefined);
 });
 
 test('sanitizeRules defaults a missing steps array and sanitizes its thresholds like scaleSteps', () => {

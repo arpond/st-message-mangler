@@ -102,12 +102,16 @@ function updateAndGetTrackerLevel(tracker, detectionText, prerequisiteMet) {
 // ruleText: null when this effect has no rules configured (the common case — runLlmRewrite falls
 // back to its normal scaleMode/scaleSteps resolution); a string (possibly empty) when it does —
 // the matched rule's text then becomes runLlmRewrite's {{scale_instruction}}, entirely replacing
-// the threshold-based scaleSteps lookup for this call. See applyEffects' Phase B.
-export async function applySingleEffect(text, effect, level, trueOriginal = text, respondingTo = '', recentMessages = [], ruleText = null) {
+// the threshold-based scaleSteps lookup for this call. ruleAmount follows the same null-vs-string
+// convention for {{amount_instruction}}/effect.llmRewrite.amountSteps. primaryHitDirection is the
+// primary tracker's own hitDirection — needed by the no-rules-configured fallback (ruleText/
+// ruleAmount === null) to mirror threshold comparisons for a 'decrease' tracker, same as
+// resolveRuleOutput already does internally when rules ARE configured. See applyEffects' Phase B.
+export async function applySingleEffect(text, effect, level, trueOriginal = text, respondingTo = '', recentMessages = [], ruleText = null, ruleAmount = null, primaryHitDirection = 'increase') {
     switch (effect.type) {
         case 'regex': return applyRegexEffect(text, effect.regex, warn);
         case 'drunk': return applyDrunk(text, effect.drunk.intensity * level);
-        case 'llm-rewrite': return runLlmRewrite(text, effect, level, trueOriginal, respondingTo, recentMessages, ruleText);
+        case 'llm-rewrite': return runLlmRewrite(text, effect, level, trueOriginal, respondingTo, recentMessages, ruleText, ruleAmount, primaryHitDirection);
         default: return text;
     }
 }
@@ -389,7 +393,7 @@ export async function applyEffects(originalText, message, settings, source, isCo
         // when present — see resolveRuleOutput. level/trend for placeholder substitution always
         // stay the primary tracker's, regardless of which rule (if any) matched.
         const ruleOutput = effect.rules.length > 0
-            ? resolveRuleOutput(effect.rules, effect.ruleMode, resolvedTrackers, trackerById, level, effect.llmRewrite.scaleMode)
+            ? resolveRuleOutput(effect.rules, effect.ruleMode, resolvedTrackers, trackerById, level, effect.llmRewrite.scaleMode, tracker.hitDirection)
             : null;
         const active = ruleOutput
             ? ruleOutput.active
@@ -399,6 +403,7 @@ export async function applyEffects(originalText, message, settings, source, isCo
         // this (possibly empty) rule-supplied value.
         const ruleText = ruleOutput ? ruleOutput.text : null;
         const ruleCue = ruleOutput ? ruleOutput.cueText : null;
+        const ruleAmount = ruleOutput ? ruleOutput.amountText : null;
 
         // Awareness cue reflects the effect's true current state regardless of target — an
         // effect can be "active" (driving the narrative cue) without this speaker's message
@@ -435,7 +440,7 @@ export async function applyEffects(originalText, message, settings, source, isCo
             debugLog(`applyEffects: "${effect.label}" (${effect.type}) proceeding at level=${level.toFixed(2)}`);
         }
         const before = text;
-        text = await applySingleEffect(text, effect, level, originalText, respondingTo, recentMessages, ruleText);
+        text = await applySingleEffect(text, effect, level, originalText, respondingTo, recentMessages, ruleText, ruleAmount, tracker.hitDirection);
         debugLog(`applyEffects: "${effect.label}" ${text === before ? 'made no change' : 'changed the text'}.`);
     }
     debugLog(`applyEffects: done — text ${text === originalText ? 'unchanged overall' : 'was rewritten overall'}.`);

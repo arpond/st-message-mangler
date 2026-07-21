@@ -92,14 +92,14 @@ test('renderTriggerPanel labels Increment/Min level for hitDirection=increase (d
     assert.doesNotMatch(html, /Min drop to apply/);
 });
 
-test('renderTriggerPanel relabels Increment -> Decrement and Min level -> Min drop when hitDirection=decrease', () => {
+test('renderTriggerPanel relabels Increment -> Decrement and Min level -> Max level when hitDirection=decrease', () => {
     const tracker = defaultTracker();
     tracker.detector = 'keyword';
     tracker.hitDirection = 'decrease';
     const html = renderTriggerPanel(tracker, 0, 0, false);
     assert.match(html, />\s*Decrement per hit</);
     assert.doesNotMatch(html, />\s*Increment per hit</);
-    assert.match(html, />\s*Min drop to apply \(once the level has fallen/);
+    assert.match(html, />\s*Max level to apply \(once the level has fallen/);
     assert.doesNotMatch(html, /Min level to apply \(below this/);
 });
 
@@ -125,7 +125,7 @@ test('renderTriggerPanel relabels Lock threshold\'s "once level reaches this" fo
 
     tracker.hitDirection = 'decrease';
     const decreasing = renderTriggerPanel(tracker, 0, 0, false);
-    assert.match(decreasing, /once the level has fallen this far toward 0, it stops drifting back permanently/);
+    assert.match(decreasing, /once the level has fallen to this value or below, it stops drifting back permanently/);
     assert.doesNotMatch(decreasing, /once level reaches this, it stops decaying permanently/);
 });
 
@@ -398,6 +398,134 @@ test('renderRulesPanel hides rule instruction text for regex/drunk effects too, 
     assert.match(html, /this rule's conditions still gate its activation/);
 });
 
+test('renderRulesPanel renders the effect-level Creative freedom ladder only when there are no rules', () => {
+    const effect = defaultEffect('llm-rewrite');
+    effect.llmRewrite.amountSteps = [{ threshold: 0.5, amount: 'heavy' }];
+    const withoutRules = renderRulesPanel(effect, []);
+    assert.match(withoutRules, /Creative freedom/);
+    assert.match(withoutRules, /data-field="llmRewrite\.amountSteps\.0\.threshold"/);
+    assert.match(withoutRules, /data-field="llmRewrite\.amountSteps\.0\.amount"/);
+    assert.match(withoutRules, /<option value="heavy" selected>/);
+
+    effect.rules = [defaultRule()];
+    const withRules = renderRulesPanel(effect, []);
+    assert.doesNotMatch(withRules, /data-field="llmRewrite\.amountSteps/);
+});
+
+test('renderRulesPanel renders a per-rule Creative freedom ladder for llm-rewrite, with the rule\'s own steps', () => {
+    const effect = defaultEffect('llm-rewrite');
+    const rule = defaultRule();
+    rule.amountSteps = [{ threshold: 0, amount: 'light' }, { threshold: 0.8, amount: 'complete' }];
+    effect.rules = [rule];
+    const html = renderRulesPanel(effect, []);
+    assert.match(html, new RegExp('data-field="rules\\.0\\.amountSteps\\.0\\.threshold"'));
+    assert.match(html, new RegExp('data-field="rules\\.0\\.amountSteps\\.1\\.amount"'));
+    assert.match(html, /<option value="complete" selected>/);
+});
+
+test('renderRulesPanel hides the per-rule Creative freedom ladder for non-llm-rewrite effect types', () => {
+    for (const type of ['regex', 'drunk', 'none']) {
+        const effect = defaultEffect(type);
+        effect.rules = [defaultRule()];
+        const html = renderRulesPanel(effect, []);
+        assert.doesNotMatch(html, new RegExp('data-field="rules\\.0\\.amountSteps'), `expected no Creative freedom field for type=${type}`);
+    }
+});
+
+test('renderRulesPanel shows the effect-level note naming the primary tracker only when there are no rules', () => {
+    const primary = defaultTracker();
+    primary.label = 'Fear';
+    const effect = defaultEffect('llm-rewrite');
+    effect.trackerId = primary.id;
+    const html = renderRulesPanel(effect, [primary]);
+    assert.match(html, /Ladders below are measured against <b>Fear<\/b>/);
+});
+
+test('renderRulesPanel renders a per-rule Ladder tracker picker, defaulting to the primary tracker, not any rule-condition tracker', () => {
+    const primary = defaultTracker();
+    primary.label = 'Fear';
+    const other = defaultTracker();
+    other.label = 'Compulsion';
+    const effect = defaultEffect('llm-rewrite');
+    effect.trackerId = primary.id;
+    effect.llmRewrite.scaleMode = 'steps';
+    const rule = defaultRule();
+    rule.conditions = [{ trackerId: other.id, minLevel: 0.5 }];
+    effect.rules = [rule];
+    const html = renderRulesPanel(effect, [primary, other]);
+    assert.match(html, /Ladder tracker/);
+    assert.match(html, /data-field="rules\.0\.levelTrackerId"/);
+    assert.match(html, /<option value="" selected>\(this effect's primary tracker: Fear\)<\/option>/);
+});
+
+test('renderRulesPanel selects the rule\'s own levelTrackerId in the Ladder tracker picker when set', () => {
+    const primary = defaultTracker();
+    primary.label = 'Fear';
+    const other = defaultTracker();
+    other.label = 'Compulsion';
+    const effect = defaultEffect('llm-rewrite');
+    effect.trackerId = primary.id;
+    const rule = defaultRule();
+    rule.levelTrackerId = other.id;
+    effect.rules = [rule];
+    const html = renderRulesPanel(effect, [primary, other]);
+    assert.match(html, new RegExp(`<option value="${other.id}" selected>Compulsion</option>`));
+});
+
+test('renderRulesPanel falls back to a placeholder note when no primary tracker is chosen', () => {
+    const effect = defaultEffect('llm-rewrite');
+    effect.trackerId = null;
+    const html = renderRulesPanel(effect, []);
+    assert.match(html, /no tracker chosen on the Basics tab/);
+});
+
+test('renderRulesPanel shows a decreasing-tracker mirroring note for the effect-level default when the primary tracker decreases', () => {
+    const primary = defaultTracker();
+    primary.label = 'Trust';
+    primary.hitDirection = 'decrease';
+    const effect = defaultEffect('llm-rewrite');
+    effect.trackerId = primary.id;
+    const html = renderRulesPanel(effect, [primary]);
+    assert.match(html, /Trust<\/b> decreases on a hit — a threshold below is reached once the level has fallen/);
+});
+
+test('renderRulesPanel omits the decreasing-tracker note for the effect-level default when the primary tracker increases', () => {
+    const primary = defaultTracker();
+    primary.label = 'Fear';
+    primary.hitDirection = 'increase';
+    const effect = defaultEffect('llm-rewrite');
+    effect.trackerId = primary.id;
+    const html = renderRulesPanel(effect, [primary]);
+    assert.doesNotMatch(html, /decreases on a hit — a threshold below is reached once the level has fallen/);
+});
+
+test('renderRulesPanel shows the mirroring note per-rule for the Ladder tracker actually in effect (override, not primary)', () => {
+    const primary = defaultTracker();
+    primary.label = 'Fear';
+    primary.hitDirection = 'increase';
+    const other = defaultTracker();
+    other.label = 'Trust';
+    other.hitDirection = 'decrease';
+    const effect = defaultEffect('llm-rewrite');
+    effect.trackerId = primary.id;
+    const rule = defaultRule();
+    rule.levelTrackerId = other.id;
+    effect.rules = [rule];
+    const html = renderRulesPanel(effect, [primary, other]);
+    assert.match(html, /Trust<\/b> decreases on a hit — a threshold below is reached once the level has fallen/);
+});
+
+test('renderRulesPanel shows no mirroring note per-rule when the rule uses the (increasing) primary tracker by default', () => {
+    const primary = defaultTracker();
+    primary.label = 'Fear';
+    primary.hitDirection = 'increase';
+    const effect = defaultEffect('llm-rewrite');
+    effect.trackerId = primary.id;
+    effect.rules = [defaultRule()];
+    const html = renderRulesPanel(effect, [primary]);
+    assert.doesNotMatch(html, /decreases on a hit — a threshold below is reached once the level has fallen/);
+});
+
 test('renderRulesPanel renders the per-rule Awareness cue field for every effect type, with the rule\'s own value', () => {
     for (const type of ['regex', 'drunk', 'llm-rewrite', 'none']) {
         const effect = defaultEffect(type);
@@ -409,4 +537,40 @@ test('renderRulesPanel renders the per-rule Awareness cue field for every effect
         assert.match(html, new RegExp(`data-field="rules\\.0\\.awarenessCue"`), `expected field path for type=${type}`);
         assert.match(html, /she notices the fear/, `expected rule's own cue text for type=${type}`);
     }
+});
+
+test('renderRulesPanel renders a rule label input, with the rule\'s own value', () => {
+    const effect = defaultEffect('llm-rewrite');
+    const rule = defaultRule();
+    rule.label = 'Fear spike';
+    effect.rules = [rule];
+    const html = renderRulesPanel(effect, []);
+    assert.match(html, /data-field="rules\.0\.label"/);
+    assert.match(html, /value="Fear spike"/);
+});
+
+test('renderRulesPanel defaults a rule to expanded when its id is not in collapsedRuleIds', () => {
+    const effect = defaultEffect('llm-rewrite');
+    const rule = defaultRule();
+    effect.rules = [rule];
+    const html = renderRulesPanel(effect, [], new Set());
+    assert.match(html, /st_mangler_rule_body" style="display: block;"/);
+});
+
+test('renderRulesPanel collapses a rule whose id is in collapsedRuleIds', () => {
+    const effect = defaultEffect('llm-rewrite');
+    const rule = defaultRule();
+    effect.rules = [rule];
+    const html = renderRulesPanel(effect, [], new Set([rule.id]));
+    assert.match(html, /st_mangler_rule_body" style="display: none;"/);
+    // Content still renders (just hidden) — a full re-render mid-collapse still has everything.
+    assert.match(html, /data-field="rules\.0\.awarenessCue"/);
+});
+
+test('renderRulesPanel renders a duplicate button per rule, addressed by rule index', () => {
+    const effect = defaultEffect('llm-rewrite');
+    effect.rules = [defaultRule(), defaultRule()];
+    const html = renderRulesPanel(effect, []);
+    assert.match(html, /st_mangler_rule_duplicate" data-rule-index="0"/);
+    assert.match(html, /st_mangler_rule_duplicate" data-rule-index="1"/);
 });

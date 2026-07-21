@@ -12,7 +12,7 @@ import {
     escapeHtmlForDisplay, resolveAwarenessCue, backfillDefaults,
     resolveScaleStep, generateScaleSteps, sanitizeScaleSteps, sanitizeRules,
     defaultTrackerShape, defaultTracker, defaultEffectShape, defaultEffect, defaultRule,
-    restingLevelValue, resolveEffectTracker,
+    restingLevelValue, resolveEffectTracker, migrateAmountToSteps, sanitizeAmountSteps,
 } from './lib/pure.js';
 import {
     infoIcon, field, renderScaleSteps, dependencyWarningIconHtml, dependencyStatusLineHtml,
@@ -21,7 +21,7 @@ import {
 import { applySingleEffect, clearAllAwarenessCues, awarenessCueKey, clearAllTrackerAutoCues, trackerAutoCueKey, clearGlobalAwarenessCue } from './pipeline.js';
 import {
     expandedTrackerIds, trackerActiveTab, renderTrackerList,
-    expandedEffectIds, effectActiveTab, renderEffectList,
+    expandedEffectIds, effectActiveTab, renderEffectList, collapsedRuleIds,
 } from './render.js';
 import { refreshStatusPanelContents, toggleStatusPanel } from './statusPanel.js';
 
@@ -57,7 +57,8 @@ const EFFECT_NO_RERENDER_FIELDS = {
     patterns: [
         /^llmRewrite\.scaleSteps\.\d+\.(threshold|text)$/, /^rules\.\d+\.text$/,
         /^rules\.\d+\.steps\.\d+\.(threshold|text)$/, /^rules\.\d+\.awarenessCue$/,
-        /^rules\.\d+\.conditions\.\d+\.minLevel$/,
+        /^rules\.\d+\.conditions\.\d+\.minLevel$/, /^rules\.\d+\.label$/,
+        /^llmRewrite\.amountSteps\.\d+\.(threshold|amount)$/, /^rules\.\d+\.amountSteps\.\d+\.(threshold|amount)$/,
     ],
 };
 
@@ -143,6 +144,13 @@ function scaleStepsFor(effect, ruleIndex) {
     return effect.rules[ruleIndex]?.steps;
 }
 
+// Same shared-array convention as scaleStepsFor above, for the "Creative freedom" ladder
+// (llmRewrite.amountSteps / rules.<i>.amountSteps) instead.
+function amountStepsFor(effect, ruleIndex) {
+    if (ruleIndex === undefined) return effect.llmRewrite.amountSteps;
+    return effect.rules[ruleIndex]?.amountSteps;
+}
+
 function downloadSettingsJson(trackers, effects, filename) {
     const data = { version: 2, trackers, effects };
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -195,8 +203,10 @@ async function importSettingsFromFile(file, settings) {
         for (const effect of data.effects) {
             const freshEffect = { ...structuredClone(effect), id: `effect_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` };
             freshEffect.trackerId = idMap.get(effect.trackerId) ?? null;
+            migrateAmountToSteps(freshEffect.llmRewrite); // before backfillDefaults — see lib/settings.js's getSettings for why
             backfillDefaults(freshEffect, defaultEffectShape(freshEffect.type), warn);
             sanitizeScaleSteps(freshEffect.llmRewrite.scaleSteps, warn);
+            sanitizeAmountSteps(freshEffect.llmRewrite.amountSteps, warn);
             // Rule conditions reference tracker ids from the imported file too — remap through
             // the same idMap as trackerId above, same "dangling drops from consideration" fail-open
             // as any other broken reference if a referenced tracker wasn't in this import.
@@ -830,6 +840,50 @@ export function addSettingsUI() {
         context.saveSettingsDebounced();
     });
 
+    $('#st_mangler_effects').on('click', '.st_mangler_amount_step_add', function () {
+        const id = $(this).closest('.st_mangler_effect').data('effect-id');
+        const effect = settings.effects.find(e => e.id === id);
+        if (!effect) return;
+        const steps = amountStepsFor(effect, $(this).data('rule-index'));
+        if (!steps) return;
+        steps.push({ threshold: 0, amount: '' });
+        refreshEffectList(settings);
+        context.saveSettingsDebounced();
+    });
+
+    $('#st_mangler_effects').on('click', '.st_mangler_amount_step_delete', function () {
+        const id = $(this).closest('.st_mangler_effect').data('effect-id');
+        const effect = settings.effects.find(e => e.id === id);
+        if (!effect) return;
+        const steps = amountStepsFor(effect, $(this).data('rule-index'));
+        if (!steps) return;
+        steps.splice($(this).data('step-index'), 1);
+        refreshEffectList(settings);
+        context.saveSettingsDebounced();
+    });
+
+    $('#st_mangler_effects').on('click', '.st_mangler_amount_step_move_up', function () {
+        const id = $(this).closest('.st_mangler_effect').data('effect-id');
+        const effect = settings.effects.find(e => e.id === id);
+        if (!effect) return;
+        const steps = amountStepsFor(effect, $(this).data('rule-index'));
+        if (!steps) return;
+        moveItem(steps, $(this).data('step-index'), -1);
+        refreshEffectList(settings);
+        context.saveSettingsDebounced();
+    });
+
+    $('#st_mangler_effects').on('click', '.st_mangler_amount_step_move_down', function () {
+        const id = $(this).closest('.st_mangler_effect').data('effect-id');
+        const effect = settings.effects.find(e => e.id === id);
+        if (!effect) return;
+        const steps = amountStepsFor(effect, $(this).data('rule-index'));
+        if (!steps) return;
+        moveItem(steps, $(this).data('step-index'), 1);
+        refreshEffectList(settings);
+        context.saveSettingsDebounced();
+    });
+
     // --- Character awareness (global, not per-tracker/per-effect) ---
 
     $('#st_mangler_global_awareness').on('input', '.st_mangler_field', function () {
@@ -890,11 +944,32 @@ export function addSettingsUI() {
         context.saveSettingsDebounced();
     });
 
+    $('#st_mangler_effects').on('click', '.st_mangler_rule_toggle', function () {
+        const id = $(this).closest('.st_mangler_rule').data('rule-id');
+        if (collapsedRuleIds.has(id)) collapsedRuleIds.delete(id); else collapsedRuleIds.add(id);
+        refreshEffectList(settings);
+    });
+
+    $('#st_mangler_effects').on('click', '.st_mangler_rule_duplicate', function () {
+        const id = $(this).closest('.st_mangler_effect').data('effect-id');
+        const effect = settings.effects.find(e => e.id === id);
+        if (!effect) return;
+        const index = $(this).data('rule-index');
+        const original = effect.rules[index];
+        if (!original) return;
+        const copy = { ...structuredClone(original), id: `rule_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` };
+        effect.rules.splice(index + 1, 0, copy); // inserted right after the original
+        refreshEffectList(settings);
+        context.saveSettingsDebounced();
+    });
+
     $('#st_mangler_effects').on('click', '.st_mangler_rule_delete', function () {
         const id = $(this).closest('.st_mangler_effect').data('effect-id');
         const effect = settings.effects.find(e => e.id === id);
         if (!effect) return;
-        effect.rules.splice($(this).data('rule-index'), 1);
+        const index = $(this).data('rule-index');
+        collapsedRuleIds.delete(effect.rules[index]?.id);
+        effect.rules.splice(index, 1);
         refreshEffectList(settings);
         context.saveSettingsDebounced();
     });
@@ -957,7 +1032,10 @@ export function addSettingsUI() {
         const effect = settings.effects.find(e => e.id === row.data('effect-id'));
         if (effect) panel.find('.st_mangler_test_cue_val').text(resolveAwarenessCue(effect.awarenessCue, level, effect.promptLevelCap));
         if (effect && effect.type === 'llm-rewrite' && effect.llmRewrite.scaleMode === 'steps') {
-            panel.find('.st_mangler_test_scale_val').text(resolveScaleStep(effect.llmRewrite.scaleSteps, level));
+            // Mirrors the tracker's own hitDirection for an accurate preview — same reasoning
+            // resolveRuleOutput/runLlmRewrite already apply for the real pipeline.
+            const tracker = settings.trackers.find(t => t.id === effect.trackerId);
+            panel.find('.st_mangler_test_scale_val').text(resolveScaleStep(effect.llmRewrite.scaleSteps, level, tracker?.hitDirection));
         }
     });
 
@@ -972,7 +1050,11 @@ export function addSettingsUI() {
         const level = levelInput.length ? Number(levelInput.val()) : 1;
         output.val('Running...');
         try {
-            output.val(await applySingleEffect(input.val(), effect, level));
+            // Test panel doesn't simulate rules (see DEVELOPMENT.md) — ruleText/ruleAmount stay
+            // at their null defaults — but does mirror the tracker's own hitDirection for the
+            // Structured-steps/Creative-freedom no-rules fallback, same as the real pipeline.
+            const tracker = settings.trackers.find(t => t.id === effect.trackerId);
+            output.val(await applySingleEffect(input.val(), effect, level, input.val(), '', [], null, null, tracker?.hitDirection));
         } catch (err) {
             output.val(`Error: ${err.message}`);
         }

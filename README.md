@@ -242,13 +242,15 @@ with:
   - **Resting level** — **Low (0)** (default) or **High (1)**: what the level starts at and what
     it returns to on Dispel now, a dispel-keyword match, auto-dispel, or a fresh chat fork.
   - **Hit direction** — **Increase** (default) or **Decrease**: which way a hit moves the level.
-    "Decrease" also mirrors **Min level to apply**/**Lock threshold** below (same 0–1 meaning,
-    "how far toward the hit direction's extreme") so they still mean the same thing either way —
-    e.g. a "trust" tracker with resting **High** and direction **Decrease** starts fully trusting
-    and erodes on a betrayal keyword, recovering on quiet turns. The UI relabels the fields that'd
-    otherwise read backwards under Decrease: **Increment per hit** becomes **Decrement per hit**,
-    and **Min level to apply** becomes **Min drop to apply**, wording only — the stored values and
-    comparisons are unchanged.
+    "Decrease" flips the comparison **Min level to apply**/**Lock threshold** below use (`level <=
+    threshold` instead of `level >= threshold`) — the number you enter is still a literal target
+    point on the same 0–1 scale the level itself lives on, just checked from the other side. E.g. a
+    "trust" tracker with resting **High** and direction **Decrease** starts fully trusting and
+    erodes on a betrayal keyword, recovering on quiet turns; a **Lock threshold** of `0.2` there
+    means "lock once trust has dropped to 0.2 or below," not "lock once it's dropped by 20%." The
+    UI relabels the fields that'd otherwise read backwards under Decrease: **Increment per hit**
+    becomes **Decrement per hit**, and **Min level to apply** becomes **Max level to apply**
+    (there's no longer a "minimum" to clear — it's a ceiling the level must fall to or below).
   - **Hit behavior** — **Gradual** (default, nudges by **Increment per hit**) or **Jump** (any hit
     sends the level straight to the extreme in **Hit direction**, e.g. a "fresh wound" that's
     instantly intense then fades). **Increment per hit** is hidden when Jump is selected, since
@@ -323,8 +325,9 @@ with:
     level instead of always 0 — e.g. to set up a specific scene state without waiting for real
     detection. Also resets turns-active and locked (same as Dispel now), and never auto-locks a
     `cumulative-lock` tracker even if the chosen level clears the lock threshold — only a real
-    rating locks it. The floating status panel has the same control per effect row (acting on that
-    effect's tracker), for setting a level without opening the settings panel mid-scene.
+    rating locks it. The floating status panel has the same controls (level-set and a **dispel
+    now** button) per tracker group, for adjusting a level without opening the settings panel
+    mid-scene.
 
 ### Auto awareness cue: letting a Tracker inform the character directly
 
@@ -415,20 +418,20 @@ effect itself has no activation or binding of its own.
 - **Chat activation** — the tracker editor's Basics tab has a **Chat activation** field: "Active by
   default (every chat)" (today's behavior — runs everywhere unless turned off for a specific chat)
   or "Inactive by default (turn on per chat)" (off everywhere until explicitly enabled for a
-  chat). Either way, the status panel shows a checkbox per enabled effect reflecting its tracker's
-  *actual* state in the current chat (default or override), with a small reset icon to clear a
-  per-chat override back to the tracker's global default.
-- **Character binding** — the status panel also shows a picker per effect (acting on that effect's
-  tracker), scoped to who can actually speak in the current chat (a group's members in a group
-  chat, just the one active character otherwise) rather than your whole install's roster. When
-  set, that tracker's detection — and, through it, every effect using it — only ever considers
-  that specific character's messages, independent of the **Detect from**/**Target** settings —
-  e.g. a "jealousy" tracker can be scoped to react to (and only drive effects mangling) one
-  particular character in a group rather than the whole cast. Unbound (the default) matches every
-  character. User messages are never gated by this — there's only one "you" in a chat, so binding
-  has nothing to restrict there. If the bound character is later deleted, the binding fails open
-  (treated as unbound) rather than permanently blocking the
-  tracker (and everything using it).
+  chat). Either way, the status panel shows one checkbox per tracker (not per effect — every
+  enabled effect sharing that tracker is listed underneath it) reflecting its *actual* state in the
+  current chat (default or override), with a small reset icon to clear a per-chat override back to
+  the tracker's global default.
+- **Character binding** — the status panel also shows a picker per tracker, scoped to who can
+  actually speak in the current chat (a group's members in a group chat, just the one active
+  character otherwise) rather than your whole install's roster. When set, that tracker's
+  detection — and, through it, every effect using it — only ever considers that specific
+  character's messages, independent of the **Detect from**/**Target** settings — e.g. a "jealousy"
+  tracker can be scoped to react to (and only drive effects mangling) one particular character in
+  a group rather than the whole cast. Unbound (the default) matches every character. User messages
+  are never gated by this — there's only one "you" in a chat, so binding has nothing to restrict
+  there. If the bound character is later deleted, the binding fails open (treated as unbound)
+  rather than permanently blocking the tracker (and everything using it).
 
 Both settings are chat-scoped state (same storage mechanism as level/turns/locked), so they
 persist per chat and travel with that chat's data, not with the tracker's global config.
@@ -472,7 +475,17 @@ Awareness cue field below — see "Per-rule awareness cue" further down) — the
 text/step ladder field is hidden for these types rather than shown and silently ignored. Rules
 still gate activation for these types exactly the same way (and for `none`, gating is the whole
 point — it's how you drive an awareness cue or status badge off a tracker combination without any
-transform at all). Rules are evaluated in order:
+transform at all).
+
+Each rule row can be collapsed to one line (chevron on the left) once a rule list gets long, same
+as an effect/tracker row — click it again to expand. The text box next to the chevron is an
+optional **label** (defaults to a placeholder "Rule N") purely for finding your way around a long
+list; it's never substituted into any prompt or cue. The copy icon **duplicates** a rule in place
+(inserted directly after the original, including its conditions/text/steps/amount/cue) — handy for
+building several similar rules (e.g. one per character) without re-entering every condition by
+hand.
+
+Rules are evaluated in order:
 
 - **First match wins** (default) — the first rule whose every condition is satisfied is used;
   later rules are never checked. A rule with *no* conditions always matches, so putting one last
@@ -501,6 +514,47 @@ completely different one for "fear while cornered," rather than reusing the same
 prose for every condition. The Rules tab's own default Structured-steps ladder (shown above the
 rule list) is the fallback used only while no rules exist; it's unused (and the panel says so, in
 effect, by not showing it) once any rule is added.
+
+**Creative freedom — separate from Scaling/Instruction text.** `{{scale_instruction}}` (flat text
+or a step ladder) is style guidance — *how* to write the rewrite. **Creative freedom** is a
+separate axis for *how much* license the model has to deviate from the original: a fixed preset
+per level (`Light`/`Moderate`/`Heavy`/`Complete rewrite`, or `(none)`), exposed to the prompt
+template as its own `{{amount_instruction}}` placeholder. Each preset is a fixed built-in
+sentence, not authored prose, so it can't be misused to smuggle style guidance the way a flat
+instruction field could. Like Structured steps, it's a **threshold ladder** — add one or more
+rows, each pairing a level threshold with a preset, and the extension picks whichever row's
+threshold is the highest one at or below the current level, so creative freedom can itself change
+as a Tracker's level rises (e.g. `Light` early, `Heavy` once fully escalated) rather than staying
+one fixed choice for the whole range. It follows the same "rules take over once present" precedent
+as everything else on this tab: the Rules tab's own **Creative freedom** ladder (next to Scaling)
+is the default used while no rules are configured; the moment a rule exists, each rule gets its
+own **Creative freedom** ladder instead, and a matched rule's resolved step entirely replaces the
+effect-level default. With **Stack all matches**, only the first matching rule's resolved step is
+used (stacking near-duplicate magnitude sentences wouldn't compose the way joined prose does) —
+its `text`/cue still stack normally. `regex`/`drunk`/`none` effects have no `{{amount_instruction}}`
+to fill either, so Creative freedom is hidden for those types same as Instruction text/Step ladder.
+
+**Ladder tracker — which tracker's level a rule's ladders use.** By default, a rule's Step ladder
+and Creative freedom ladder are both measured against this effect's own primary tracker (Basics
+tab) — same one `{{level}}`/`{{level_pct}}` substitute. Each rule can override this with its own
+**Ladder tracker** picker (shown above both ladders once any rule exists): pick a different
+tracker — typically one named in this rule's own conditions — and both ladders measure against
+*that* tracker's level instead, while `{{level}}`/`{{level_pct}}`/`{{trend}}` substitution, this
+rule's conditions, and chat-activation/character-binding all stay on the primary tracker
+regardless. Left unset (the default, "(this effect's primary tracker: ...)"), nothing changes from
+before. A picked tracker that's since been deleted fails open to the primary tracker's level, same
+as a dangling rule condition.
+
+**A ladder threshold is a literal target level, from either direction.** For a tracker with **Hit
+direction: Increase**, a step/preset is reached once the level rises to that threshold or above
+(the familiar behavior). For **Hit direction: Decrease** (rests near 1, drops toward 0 on a hit),
+it's reached once the level falls to that threshold *or below* — same comparison **Min level to
+apply**/**Lock threshold** use. A LOW threshold on a decreasing tracker fires almost immediately
+(barely any drop needed); a HIGH threshold needs the level to fall nearly all the way. When
+several thresholds are reached at once, the ladder picks the tightest one — highest for increase,
+lowest for decrease — so more specific/extreme steps still win as the level keeps moving. Whenever
+the tracker a ladder is actually measuring against (the primary tracker, or a rule's own Ladder
+tracker override) decreases, a note appears above that ladder as a reminder of this flip.
 
 **Per-rule awareness cue.** Independent of `{{scale_instruction}}` entirely, each rule also has its
 own optional **Awareness cue** field — shown for every effect type, including `none`, unlike
@@ -539,9 +593,10 @@ concrete scenarios:
 - **"Eroding trust"** — starts high, collapses under pressure, recovers if left alone. Resting
   level **High**, Hit direction **Decrease**, Hit behavior **Gradual**, keywords
   `lied, betrayed, broke his promise`. The level starts at `1.00` and *drops* by **Increment per
-  hit** on a match instead of rising. **Min level to apply** is mirrored for a Decrease tracker —
-  set it to `0.8` and any effect using this tracker activates once trust has fallen to `0.2` or
-  below (80% of the way toward full collapse), not once it's risen to `0.8`.
+  hit** on a match instead of rising. For a Decrease tracker, **Max level to apply** (labeled "Min
+  level to apply" for Increase) is a literal target level, checked with `<=` instead of `>=` — set
+  it to `0.2` and any effect using this tracker activates once trust has fallen to `0.2` or below,
+  not once it's risen to `0.2`.
 - **"Confession gated by trust and tension"** — two progressive trackers, `Trust` and `Tension`,
   each escalating independently from their own keywords/LLM condition. A third tracker,
   `Confession`, has *two* Dependency-tab rows: `Trust` at Min level `0.6` and `Tension` at Min
@@ -569,15 +624,18 @@ success — only a genuinely persistent failure reaches the fail-open path.
 ### Floating status panel
 
 Click **Status panel** (next to Collapse all in the extension's settings), or **Mangler status**
-in the wand/extensions menu next to the chat input, to open a small draggable overlay listing
-every enabled effect with its per-chat active/bound state, plus (for effects whose tracker is
-progressive) the same 🔒/●/○ + level badge the collapsed Tracker rows show, updating in real time
-as messages are processed — without needing the Extensions drawer open mid-scene. An effect using
-an `always`-mode tracker is still listed (activation/binding still apply to it) but shows no
-level/lock badge, since its level is a trivial constant `1`. The wand-menu entry is the easier way
-to reach the panel on mobile, where scrolling to the settings-panel button is awkward. Drag it
-anywhere (position persists across reloads via SillyTavern's Moving UI); close it with the ✕ or
-either toolbar button. The panel starts closed on each page load.
+in the wand/extensions menu next to the chat input, to open a small draggable overlay — grouped by
+**Tracker**, not by effect. Each group shows that tracker's per-chat active/bound state, a **Set
+level** field and **dispel now** button (for progressive trackers), and (again progressive only)
+the same 🔒/●/○ + level badge the collapsed Tracker rows show, all updating in real time as
+messages are processed — without needing the Extensions drawer open mid-scene. Underneath, every
+enabled effect using that tracker is listed, and for any effect with rules, which rule currently
+matches is shown alongside it, so you can see at a glance what an `llm-rewrite` effect will
+actually do next. A tracker using `always` mode is still listed (activation/binding still apply to
+it) but shows no level/lock badge, since its level is a trivial constant `1`. The wand-menu entry
+is the easier way to reach the panel on mobile, where scrolling to the settings-panel button is
+awkward. Drag it anywhere (position persists across reloads via SillyTavern's Moving UI); close it
+with the ✕ or either toolbar button. The panel starts closed on each page load.
 
 ### Pausing transforms for one message
 

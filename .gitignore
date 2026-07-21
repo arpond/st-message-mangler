@@ -5,3 +5,4 @@ node_modules/
 test/ui/.fixture/
 test-results/
 playwright-report/
+.serena/

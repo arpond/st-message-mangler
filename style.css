@@ -38,6 +38,22 @@
     margin-top: 0.4em;
 }
 
+.st_mangler_rule {
+    border: 1px solid var(--SmartThemeBorderColor, #444);
+    border-radius: 6px;
+    padding: 0.4em;
+    margin: 0.4em 0;
+}
+
+.st_mangler_rule_toggle {
+    flex: 0 0 auto;
+    cursor: pointer;
+}
+
+.st_mangler_rule_body {
+    margin-top: 0.4em;
+}
+
 .st_mangler_test_panel textarea {
     margin: 0.2em 0;
 }
@@ -91,6 +107,10 @@
 .st_mangler_scale_step textarea {
     flex: 1;
     min-height: unset;
+}
+
+.st_mangler_scale_step select {
+    flex: 1;
 }
 
 .st_mangler_dependency_row {
@@ -313,4 +333,50 @@
 #st_mangler_status_panel .st_mangler_status_empty {
     opacity: 0.6;
     font-style: italic;
+}
+
+#st_mangler_status_panel .st_mangler_status_tracker_group {
+    margin: 0.3em 0;
+    padding-bottom: 0.3em;
+    border-bottom: 1px dashed var(--SmartThemeBorderColor, #666);
+}
+
+#st_mangler_status_panel .st_mangler_status_tracker_group:last-child {
+    border-bottom: none;
+}
+
+#st_mangler_status_panel .st_mangler_status_dispel {
+    flex: 0 0 auto;
+    cursor: pointer;
+    opacity: 0.7;
+}
+
+#st_mangler_status_panel .st_mangler_status_dispel:hover {
+    opacity: 1;
+}
+
+#st_mangler_status_panel .st_mangler_status_effect_row {
+    display: flex;
+    align-items: center;
+    gap: 0.4em;
+    margin: 0.15em 0 0 1.6em;
+    font-size: 0.85em;
+    opacity: 0.85;
+}
+
+#st_mangler_status_panel .st_mangler_status_effect_label {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#st_mangler_status_panel .st_mangler_status_active_rule {
+    flex: 0 0 auto;
+    font-style: italic;
+    opacity: 0.8;
+    max-width: 9em;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
