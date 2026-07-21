@@ -85,3 +85,89 @@ test('opening the Trackers/Effects modal relocates both panes with layout intact
     await expect(page.locator('#st_mangler_effects_pane')).toBeHidden();
     await expect(page.locator('#st_mangler_effects_pane .st_mangler_effect')).toHaveCount(1);
 });
+
+test('duplicating an effect with a collapsed rule gives the copy its own fresh rule id', async ({ page }) => {
+    await page.goto(HARNESS_URL);
+    await page.locator('#st_mangler_open_trackers_effects_modal').click();
+
+    // The regression this test exists for: effect duplicate/import used to copy `rules[].id`
+    // verbatim, and `collapsedRuleIds` (render.js) is a single flat Set keyed by rule id, not
+    // scoped per effect — two effects whose rules shared an id would silently share collapse
+    // state. "Add effect" auto-pairs a fresh Tracker; only the Effect side matters here.
+    await page.locator('#st_mangler_modal_effect_slot #st_mangler_add_effect').click();
+    const modalEffectSlot = page.locator('#st_mangler_modal_effect_slot');
+    const effect = modalEffectSlot.locator('.st_mangler_effect').first();
+
+    // Rules only render a Creative-freedom/Step-ladder section for llm-rewrite, but the rule
+    // row + collapse toggle exist regardless of type — default 'regex' type is fine here.
+    await effect.locator('.st_mangler_tab_btn[data-tab="rules"]').click();
+    await effect.locator('.st_mangler_rule_add').click();
+
+    const rule = effect.locator('.st_mangler_rule').first();
+    await expect(rule.locator('.st_mangler_rule_body')).toBeVisible(); // new rules open expanded
+    await rule.locator('.st_mangler_rule_toggle').click();
+    await expect(rule.locator('.st_mangler_rule_body')).toBeHidden();
+
+    await effect.locator('.st_mangler_effect_duplicate').click();
+
+    // Duplicate is inserted right after the original — index 1.
+    const duplicate = modalEffectSlot.locator('.st_mangler_effect').nth(1);
+    await duplicate.locator('.st_mangler_tab_btn[data-tab="rules"]').click();
+    const duplicateRule = duplicate.locator('.st_mangler_rule').first();
+    // If the rule id had been copied verbatim (the bug), this would render collapsed too, since
+    // the original's id would already be sitting in the shared collapsedRuleIds Set.
+    await expect(duplicateRule.locator('.st_mangler_rule_body')).toBeVisible();
+});
+
+test('status panel set-level/dispel/active-toggle act on the effect\'s underlying tracker', async ({ page }) => {
+    await page.goto(HARNESS_URL);
+    await page.locator('#st_mangler_open_trackers_effects_modal').click();
+    await page.locator('#st_mangler_modal_effect_slot #st_mangler_add_effect').click();
+
+    // "Add effect" auto-pairs a fresh tracker but only opens the *effect* expanded — the tracker
+    // itself starts collapsed (its tab strip isn't rendered while collapsed), so expand it first.
+    const tracker = page.locator('#st_mangler_modal_tracker_slot .st_mangler_tracker').first();
+    await tracker.locator('.st_mangler_tracker_toggle').click();
+    // A fresh tracker defaults to `mode: 'always'`, which the status panel doesn't show a level
+    // input for — switch to Progressive so the set-level/dispel round trip has something to show.
+    await tracker.locator('.st_mangler_tab_btn[data-tab="trigger"]').click();
+    await tracker.locator('select[data-field="mode"]').selectOption('progressive');
+
+    // The Status panel toggle button lives inside `#st_mangler_effects_pane`, which is
+    // `display: none` in the drawer and only visible once reparented into the modal — click it
+    // before closing. The floating panel itself is appended to `#movingDivs`, outside the
+    // reparented pane, so it survives the modal closing afterward.
+    await page.locator('#st_mangler_status_panel_toggle').click();
+    await page.locator('.popup-button-cancel').click();
+    await expect(page.locator('#st_mangler_effects_pane')).toBeHidden();
+
+    const group = () => page.locator('.st_mangler_status_tracker_group').first();
+    await expect(group()).toBeVisible();
+
+    // resting default is `restingLevel: 'low'` -> 0.
+    await expect(group().locator('.st_mangler_status_set_level')).toHaveValue('0.00');
+    await group().locator('.st_mangler_status_set_level').fill('0.75');
+    await group().locator('.st_mangler_status_set_level').dispatchEvent('change');
+    // The panel body is fully re-rendered (`.html()`) on every change — re-locate afterward
+    // rather than reusing the pre-change element handle.
+    await expect(group().locator('.st_mangler_status_set_level')).toHaveValue('0.75');
+
+    // The dispel/reset-active icons are bare `<i class="fa-solid ...">` glyphs with no real
+    // FontAwesome font loaded in this fixture (unlike the wrapped `menu_button_icon` buttons
+    // elsewhere), so they render with a zero-size box and fail Playwright's visibility-based
+    // click/visible checks despite being functionally clickable — dispatch the click directly and
+    // assert presence via count instead of `toBeVisible()`.
+    await group().locator('.st_mangler_status_dispel').dispatchEvent('click');
+    await expect(group().locator('.st_mangler_status_set_level')).toHaveValue('0.00');
+
+    // `chatActivationMode: 'auto'` (the default) means active-by-checked with no override, and
+    // no reset-to-default icon until an override actually exists.
+    await expect(group().locator('.st_mangler_status_active')).toBeChecked();
+    await expect(group().locator('.st_mangler_status_reset_active')).toHaveCount(0);
+    await group().locator('.st_mangler_status_active').uncheck();
+    await expect(group().locator('.st_mangler_status_active')).not.toBeChecked();
+    await expect(group().locator('.st_mangler_status_reset_active')).toHaveCount(1);
+    await group().locator('.st_mangler_status_reset_active').dispatchEvent('click');
+    await expect(group().locator('.st_mangler_status_active')).toBeChecked();
+    await expect(group().locator('.st_mangler_status_reset_active')).toHaveCount(0);
+});
