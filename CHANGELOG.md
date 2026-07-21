@@ -4,6 +4,14 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v46
+
+- **Fix: duplicating or re-importing an effect with rules could share collapse state across
+  effects** — effect duplicate and import both copied `rules[].id` verbatim instead of minting
+  fresh ones (unlike the tracker/rule id already do). Since the settings panel's collapsed-rule
+  tracking is a single flat set keyed by rule id (not scoped per effect), two effects whose rules
+  shared an id would silently collapse/expand together. Both call sites now regenerate rule ids.
+
 ## v45
 
 - **Warn when the batched LLM detector packs many conditions into one call** — same "model

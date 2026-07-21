@@ -211,7 +211,11 @@ async function importSettingsFromFile(file, settings) {
             // Rule conditions reference tracker ids from the imported file too — remap through
             // the same idMap as trackerId above, same "dangling drops from consideration" fail-open
             // as any other broken reference if a referenced tracker wasn't in this import.
+            // Each rule's own id must be fresh too (not just re-mapped references) — same
+            // collapsedRuleIds collision risk as effect duplicate above: importing the same file
+            // twice would otherwise produce two effects whose rules share ids in that flat Set.
             for (const rule of freshEffect.rules) {
+                rule.id = `rule_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
                 for (const cond of rule.conditions) cond.trackerId = idMap.get(cond.trackerId) ?? cond.trackerId;
             }
             sanitizeRules(freshEffect.rules, warn);
@@ -740,6 +744,10 @@ export function addSettingsUI() {
         const index = effect ? settings.effects.indexOf(effect) : -1;
         if (index === -1) return;
         const copy = { ...structuredClone(settings.effects[index]), id: `effect_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` };
+        // Rule ids must be fresh too, not just the effect's own — collapsedRuleIds (render.js) is
+        // a single flat Set keyed by rule id, not scoped per effect, so a copied rule sharing its
+        // original's id would silently share collapse/expand state with it.
+        for (const rule of copy.rules) rule.id = `rule_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
         settings.effects.splice(index + 1, 0, copy); // inserted right after the original
         expandedEffectIds.add(copy.id); // opens expanded, same convention as a newly-added effect
         refreshEffectList(settings);
