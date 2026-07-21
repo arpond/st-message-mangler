@@ -214,6 +214,39 @@ function updateGlobalAwarenessCue(settings, level, trend) {
     context.setExtensionPrompt(GLOBAL_AWARENESS_CUE_KEY, cue, extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
 }
 
+// Phase A½: dispatches the batched LLM detector call for whichever trackers are due this message
+// (empty dueLlmDetectors is a no-op). Skips entirely on a Continue (see applyEffects' isContinuation
+// doc below). Otherwise awaits the batch (serialized) if an llm-rewrite effect is also active this
+// message — two concurrent generateRaw calls to the same backend has been observed to leave
+// SillyTavern's send flow in a broken state (the user's message never renders); local
+// single-worker backends in particular seem to get confused by overlapping quiet-generation
+// requests — or fires it in the background (free latency-wise) otherwise. `budget` is the shared
+// { remaining } counter also consumed by llm-rewrite calls in Phase B.
+async function runDueDetectorsIfNeeded(dueLlmDetectors, settings, source, messageCharacterAvatar, trackerById, isContinuation, budget) {
+    if (dueLlmDetectors.length === 0) return;
+    if (isContinuation) {
+        debugLog(`applyEffects: skipping LLM detector batch for ${dueLlmDetectors.length} tracker(s) — continuation of the same message, already rated this turn.`);
+        return;
+    }
+    if (budget.remaining <= 0) {
+        warn(`Skipping LLM detector batch (${dueLlmDetectors.length} tracker(s)) — LLM call budget (${settings.maxLlmCallsPerMessage}) exhausted for this message.`);
+        return;
+    }
+    budget.remaining--;
+    const hasRewriteEffect = settings.effects.some(e => {
+        if (!e.enabled || e.type !== 'llm-rewrite' || !effectAppliesToTarget(e, source)) return false;
+        const tracker = trackerById.get(e.trackerId);
+        return !!tracker && isTrackerActiveInChat(tracker) && trackerMatchesCharacter(tracker, source, messageCharacterAvatar);
+    });
+    if (hasRewriteEffect) {
+        debugLog(`applyEffects: awaiting LLM detector batch for ${dueLlmDetectors.length} tracker(s) (serialized — an llm-rewrite effect is active this message), budget remaining after=${budget.remaining}`);
+        await runBatchedLlmDetectors(dueLlmDetectors, settings.trackers, settings.globalAwareness);
+    } else {
+        debugLog(`applyEffects: firing LLM detector batch for ${dueLlmDetectors.length} tracker(s) (background), budget remaining after=${budget.remaining}`);
+        runBatchedLlmDetectors(dueLlmDetectors, settings.trackers, settings.globalAwareness); // fire-and-forget, once for the whole message
+    }
+}
+
 // isContinuation: true when this call is reprocessing the tail end of a Continue rather than a
 // genuinely new incoming message (see splitContinuationSuffix in onCharacterMessageRendered).
 // Skips firing the LLM detector batch in that case — rating a growing scene across real turns is
@@ -221,11 +254,13 @@ function updateGlobalAwarenessCue(settings, level, trend) {
 // just because it got interrupted by Continue would double-apply cumulative/cumulative-lock
 // increments (and waste a call for absolute mode, which just overwrites anyway).
 //
-// Two-phase per call: Phase A resolves each Tracker's level/trend exactly once regardless of how
-// many Effects reference it (today always exactly one — see DEVELOPMENT.md — but the resolution
-// is already structured this way since re-running detection per referencing Effect would be
-// wrong the moment more than one exists); Phase B walks Effects in list order (preserving the
-// existing chained-transform ordering) consuming whichever Tracker's resolved level applies.
+// Three phases per call: Phase A resolves each Tracker's level/trend exactly once regardless of
+// how many Effects reference it (today always exactly one — see DEVELOPMENT.md — but the
+// resolution is already structured this way since re-running detection per referencing Effect
+// would be wrong the moment more than one exists); the batched LLM detector dispatch
+// (runDueDetectorsIfNeeded above) sits between A and B rather than inside either; Phase B walks
+// Effects in list order (preserving the existing chained-transform ordering) consuming whichever
+// Tracker's resolved level applies.
 export async function applyEffects(originalText, message, settings, source, isContinuation = false, respondingTo = '', recentMessages = []) {
     const budget = { remaining: settings.maxLlmCallsPerMessage };
     // Consumed once per call (not per effect) so a "pause next message" request applies uniformly
@@ -338,34 +373,7 @@ export async function applyEffects(originalText, message, settings, source, isCo
         // A locked cumulative-lock tracker ignores its rating entirely (see applyLlmRating), so
         // including it just pays batch-prompt tokens for a discarded result.
         && !(t.llmIntegrationMode === 'cumulative-lock' && getTrackerLocked(t)));
-    if (dueLlmDetectors.length > 0 && isContinuation) {
-        debugLog(`applyEffects: skipping LLM detector batch for ${dueLlmDetectors.length} tracker(s) — continuation of the same message, already rated this turn.`);
-    } else if (dueLlmDetectors.length > 0) {
-        if (budget.remaining > 0) {
-            budget.remaining--;
-            // If any llm-rewrite effect is active this message, run the detector batch inline
-            // (awaited) instead of fire-and-forget: two concurrent generateRaw calls to the same
-            // backend has been observed to leave SillyTavern's send flow in a broken state (the
-            // user's message never renders) — local single-worker backends in particular seem to
-            // get confused by overlapping quiet-generation requests. Serializing costs the
-            // detector's own latency on this message instead of running for free in the
-            // background, but only in this specific combination.
-            const hasRewriteEffect = settings.effects.some(e => {
-                if (!e.enabled || e.type !== 'llm-rewrite' || !effectAppliesToTarget(e, source)) return false;
-                const tracker = trackerById.get(e.trackerId);
-                return !!tracker && isTrackerActiveInChat(tracker) && trackerMatchesCharacter(tracker, source, messageCharacterAvatar);
-            });
-            if (hasRewriteEffect) {
-                debugLog(`applyEffects: awaiting LLM detector batch for ${dueLlmDetectors.length} tracker(s) (serialized — an llm-rewrite effect is active this message), budget remaining after=${budget.remaining}`);
-                await runBatchedLlmDetectors(dueLlmDetectors, settings.trackers, settings.globalAwareness);
-            } else {
-                debugLog(`applyEffects: firing LLM detector batch for ${dueLlmDetectors.length} tracker(s) (background), budget remaining after=${budget.remaining}`);
-                runBatchedLlmDetectors(dueLlmDetectors, settings.trackers, settings.globalAwareness); // fire-and-forget, once for the whole message
-            }
-        } else {
-            warn(`Skipping LLM detector batch (${dueLlmDetectors.length} tracker(s)) — LLM call budget (${settings.maxLlmCallsPerMessage}) exhausted for this message.`);
-        }
-    }
+    await runDueDetectorsIfNeeded(dueLlmDetectors, settings, source, messageCharacterAvatar, trackerById, isContinuation, budget);
 
     // --- Phase B: walk Effects in list order, each consuming its Tracker's resolved level ---
     let text = originalText;

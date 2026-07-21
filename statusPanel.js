@@ -2,6 +2,7 @@ import { loadMovingUIState } from '../../../power-user.js';
 import { dragElement } from '../../../RossAscends-mods.js';
 import { context } from './lib/context.js';
 import { getSettings } from './lib/settings.js';
+import { findTrackerFromEl } from './lib/domHelpers.js';
 import {
     trackerStatusBadgeHtml, getTrackerLevel, setTrackerLevel, setTrackerTurnsActive, setTrackerLocked, setTransformPaused,
     getTrackerChatBinding, setTrackerChatBinding, getTrackerChatActiveOverride, setTrackerChatActiveOverride,
@@ -146,8 +147,7 @@ function openStatusPanel(settings) {
     // (rows are grouped by tracker now, not one row per effect) — these controls act on the
     // underlying Tracker, which is what actually owns this state.
     $('#st_mangler_status_panel').on('change', '.st_mangler_status_set_level', function () {
-        const trackerId = $(this).closest('.st_mangler_status_tracker_group').data('tracker-id');
-        const tracker = getSettings().trackers.find(t => t.id === trackerId);
+        const tracker = findTrackerFromEl(this, getSettings(), '.st_mangler_status_tracker_group');
         if (!tracker) return;
         const level = Number($(this).val());
         setTrackerLevel(tracker, level);
@@ -156,22 +156,19 @@ function openStatusPanel(settings) {
         refreshStatusPanelContents(getSettings());
     });
     $('#st_mangler_status_panel').on('change', '.st_mangler_status_active', function () {
-        const trackerId = $(this).closest('.st_mangler_status_tracker_group').data('tracker-id');
-        const tracker = getSettings().trackers.find(t => t.id === trackerId);
+        const tracker = findTrackerFromEl(this, getSettings(), '.st_mangler_status_tracker_group');
         if (!tracker) return;
         setTrackerChatActiveOverride(tracker, $(this).prop('checked'));
         refreshStatusPanelContents(getSettings());
     });
     $('#st_mangler_status_panel').on('click', '.st_mangler_status_reset_active', function () {
-        const trackerId = $(this).closest('.st_mangler_status_tracker_group').data('tracker-id');
-        const tracker = getSettings().trackers.find(t => t.id === trackerId);
+        const tracker = findTrackerFromEl(this, getSettings(), '.st_mangler_status_tracker_group');
         if (!tracker) return;
         setTrackerChatActiveOverride(tracker, undefined);
         refreshStatusPanelContents(getSettings());
     });
     $('#st_mangler_status_panel').on('click', '.st_mangler_status_dispel', function () {
-        const trackerId = $(this).closest('.st_mangler_status_tracker_group').data('tracker-id');
-        const tracker = getSettings().trackers.find(t => t.id === trackerId);
+        const tracker = findTrackerFromEl(this, getSettings(), '.st_mangler_status_tracker_group');
         if (!tracker) return;
         setTrackerLevel(tracker, restingLevelValue(tracker.restingLevel));
         setTrackerTurnsActive(tracker, 0);
@@ -179,8 +176,7 @@ function openStatusPanel(settings) {
         refreshStatusPanelContents(getSettings());
     });
     $('#st_mangler_status_panel').on('change', '.st_mangler_status_bind', function () {
-        const trackerId = $(this).closest('.st_mangler_status_tracker_group').data('tracker-id');
-        const tracker = getSettings().trackers.find(t => t.id === trackerId);
+        const tracker = findTrackerFromEl(this, getSettings(), '.st_mangler_status_tracker_group');
         if (!tracker) return;
         setTrackerChatBinding(tracker, $(this).val());
         refreshStatusPanelContents(getSettings());

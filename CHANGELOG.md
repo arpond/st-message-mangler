@@ -4,6 +4,16 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v43
+
+- **Internal cleanup — no behavior change.** Follow-up from a full-repo duplication audit: added
+  `findTrackerFromEl`/`findEffectFromEl` helpers (`lib/domHelpers.js`) replacing ~35 repeated
+  `closest(row).data(id) → find → guard` sites across `settingsUI.js`/`statusPanel.js`; extracted
+  a shared `renderTrackerConditionRow` helper in `lib/render.js` for the tracker-picker-row markup
+  previously duplicated between the Dependency panel and a Rule's condition rows; and named
+  `applyEffects`' batched-LLM-detector dispatch as its own `runDueDetectorsIfNeeded` function
+  (`pipeline.js`) instead of an unnamed block wedged between the documented Phase A/Phase B split.
+
 ## v42
 
 - **Status panel: grouped by trigger, not by effect** — the floating status panel now lists each

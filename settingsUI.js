@@ -2,6 +2,7 @@ import { extension_prompt_types } from '../../../../script.js';
 import { Popup, POPUP_TYPE } from '../../../popup.js';
 import { context } from './lib/context.js';
 import { log, warn } from './lib/log.js';
+import { findTrackerFromEl, findEffectFromEl } from './lib/domHelpers.js';
 import { getSettings } from './lib/settings.js';
 import {
     getTrackerLevel, getTrackerLocked, setTrackerLevel, setTrackerTurnsActive, setTrackerLocked, setTransformPaused,
@@ -546,7 +547,7 @@ export function addSettingsUI() {
     });
 
     $('#st_mangler_trackers').on('click', '.st_mangler_tracker_dispel_now', function () {
-        const tracker = settings.trackers.find(t => t.id === $(this).closest('.st_mangler_tracker').data('tracker-id'));
+        const tracker = findTrackerFromEl(this, settings);
         if (!tracker) return;
         setTrackerLevel(tracker, restingLevelValue(tracker.restingLevel));
         setTrackerTurnsActive(tracker, 0);
@@ -558,10 +559,9 @@ export function addSettingsUI() {
     // always the resting level — never auto-locks even if the chosen level clears lockThreshold,
     // since this is a manual override, not a real rating crossing the threshold.
     $('#st_mangler_trackers').on('click', '.st_mangler_tracker_set_level', function () {
-        const row = $(this).closest('.st_mangler_tracker');
-        const tracker = settings.trackers.find(t => t.id === row.data('tracker-id'));
+        const tracker = findTrackerFromEl(this, settings);
         if (!tracker) return;
-        const level = Number(row.find('.st_mangler_set_level_input').val());
+        const level = Number($(this).closest('.st_mangler_tracker').find('.st_mangler_set_level_input').val());
         setTrackerLevel(tracker, level);
         setTrackerTurnsActive(tracker, 0);
         setTrackerLocked(tracker, false);
@@ -569,8 +569,8 @@ export function addSettingsUI() {
     });
 
     $('#st_mangler_trackers').on('click', '.st_mangler_tracker_duplicate', function () {
-        const id = $(this).closest('.st_mangler_tracker').data('tracker-id');
-        const index = settings.trackers.findIndex(t => t.id === id);
+        const tracker = findTrackerFromEl(this, settings);
+        const index = tracker ? settings.trackers.indexOf(tracker) : -1;
         if (index === -1) return;
         const copy = { ...structuredClone(settings.trackers[index]), id: `tracker_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` };
         copy.dependencies = []; // never inherit dependencies — could point at the wrong tracker after copying
@@ -587,7 +587,9 @@ export function addSettingsUI() {
     // as a dangling dependency/character-binding/connection-profile elsewhere in this codebase;
     // any referencing Effect just shows a caution icon (see renderEffectRow) until repointed.
     $('#st_mangler_trackers').on('click', '.st_mangler_tracker_delete', function () {
-        const id = $(this).closest('.st_mangler_tracker').data('tracker-id');
+        const tracker = findTrackerFromEl(this, settings);
+        if (!tracker) return;
+        const id = tracker.id;
         context.setExtensionPrompt(trackerAutoCueKey(id), '', extension_prompt_types.IN_CHAT, 0);
         settings.trackers = settings.trackers.filter(t => t.id !== id);
         expandedTrackerIds.delete(id);
@@ -598,8 +600,7 @@ export function addSettingsUI() {
     });
 
     $('#st_mangler_trackers').on('click', '.st_mangler_dependency_add', function () {
-        const id = $(this).closest('.st_mangler_tracker').data('tracker-id');
-        const tracker = settings.trackers.find(t => t.id === id);
+        const tracker = findTrackerFromEl(this, settings);
         if (!tracker) return;
         tracker.dependencies.push({ trackerId: '', minLevel: 0.5 });
         refreshTrackerList(settings);
@@ -607,8 +608,7 @@ export function addSettingsUI() {
     });
 
     $('#st_mangler_trackers').on('click', '.st_mangler_dependency_delete', function () {
-        const id = $(this).closest('.st_mangler_tracker').data('tracker-id');
-        const tracker = settings.trackers.find(t => t.id === id);
+        const tracker = findTrackerFromEl(this, settings);
         if (!tracker) return;
         tracker.dependencies.splice($(this).data('dep-index'), 1);
         refreshTrackerList(settings);
@@ -627,9 +627,9 @@ export function addSettingsUI() {
     });
 
     $('#st_mangler_trackers').on('click', '.st_mangler_tracker_test_detect', async function () {
-        const row = $(this).closest('.st_mangler_tracker');
-        const tracker = settings.trackers.find(t => t.id === row.data('tracker-id'));
+        const tracker = findTrackerFromEl(this, settings);
         if (!tracker) return;
+        const row = $(this).closest('.st_mangler_tracker');
         const output = row.find('.st_mangler_tracker_test_output');
         output.val('Testing detection...');
         try {
@@ -640,9 +640,7 @@ export function addSettingsUI() {
     });
 
     $('#st_mangler_trackers').on('input', '.st_mangler_field', function () {
-        const row = $(this).closest('.st_mangler_tracker');
-        const id = row.data('tracker-id');
-        const tracker = settings.trackers.find(t => t.id === id);
+        const tracker = findTrackerFromEl(this, settings);
         if (!tracker) return;
 
         const fieldPath = $(this).data('field');
@@ -738,8 +736,8 @@ export function addSettingsUI() {
     });
 
     $('#st_mangler_effects').on('click', '.st_mangler_effect_duplicate', function () {
-        const id = $(this).closest('.st_mangler_effect').data('effect-id');
-        const index = settings.effects.findIndex(e => e.id === id);
+        const effect = findEffectFromEl(this, settings);
+        const index = effect ? settings.effects.indexOf(effect) : -1;
         if (index === -1) return;
         const copy = { ...structuredClone(settings.effects[index]), id: `effect_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` };
         settings.effects.splice(index + 1, 0, copy); // inserted right after the original
@@ -749,15 +747,15 @@ export function addSettingsUI() {
     });
 
     $('#st_mangler_effects').on('click', '.st_mangler_effect_export_single', function () {
-        const id = $(this).closest('.st_mangler_effect').data('effect-id');
-        const effect = settings.effects.find(e => e.id === id);
+        const effect = findEffectFromEl(this, settings);
         if (effect) exportSingleEffect(effect, settings);
     });
 
     $('#st_mangler_effects').on('click', '.st_mangler_effect_delete', function () {
-        const id = $(this).closest('.st_mangler_effect').data('effect-id');
-        const effect = settings.effects.find(e => e.id === id);
-        if (effect) context.setExtensionPrompt(awarenessCueKey(effect), '', extension_prompt_types.IN_CHAT, 0);
+        const effect = findEffectFromEl(this, settings);
+        if (!effect) return;
+        const id = effect.id;
+        context.setExtensionPrompt(awarenessCueKey(effect), '', extension_prompt_types.IN_CHAT, 0);
         settings.effects = settings.effects.filter(e => e.id !== id);
         expandedEffectIds.delete(id);
         effectActiveTab.delete(id);
@@ -765,14 +763,13 @@ export function addSettingsUI() {
         context.saveSettingsDebounced();
     });
     $('#st_mangler_effects').on('click', '.st_mangler_insert_template', function () {
-        const row = $(this).closest('.st_mangler_effect');
-        const effect = settings.effects.find(e => e.id === row.data('effect-id'));
+        const effect = findEffectFromEl(this, settings);
         if (!effect) return;
         if (effect.llmRewrite.promptTemplate.trim()) {
             toastr.warning('Message Mangler: template already has content — clear it first to insert a starter template.');
             return;
         }
-        const example = PROMPT_TEMPLATE_EXAMPLES.find(e => e.id === row.find('.st_mangler_template_example_select').val());
+        const example = PROMPT_TEMPLATE_EXAMPLES.find(e => e.id === $(this).closest('.st_mangler_effect').find('.st_mangler_template_example_select').val());
         if (!example) return;
         effect.llmRewrite.promptTemplate = example.template;
         refreshEffectList(settings);
@@ -780,13 +777,12 @@ export function addSettingsUI() {
     });
 
     $('#st_mangler_effects').on('click', '.st_mangler_scale_gen_run', function () {
-        const row = $(this).closest('.st_mangler_effect');
-        const id = row.data('effect-id');
-        const effect = settings.effects.find(e => e.id === id);
+        const effect = findEffectFromEl(this, settings);
         if (!effect) return;
         const ruleIndex = $(this).data('rule-index');
         const steps = scaleStepsFor(effect, ruleIndex);
         if (!steps) return;
+        const row = $(this).closest('.st_mangler_effect');
         const count = Number(row.find('.st_mangler_scale_gen_count').val());
         const curve = row.find('.st_mangler_scale_gen_curve').val();
         const generated = generateScaleSteps(count, curve, steps);
@@ -797,8 +793,7 @@ export function addSettingsUI() {
     });
 
     $('#st_mangler_effects').on('click', '.st_mangler_scale_step_add', function () {
-        const id = $(this).closest('.st_mangler_effect').data('effect-id');
-        const effect = settings.effects.find(e => e.id === id);
+        const effect = findEffectFromEl(this, settings);
         if (!effect) return;
         const steps = scaleStepsFor(effect, $(this).data('rule-index'));
         if (!steps) return;
@@ -808,8 +803,7 @@ export function addSettingsUI() {
     });
 
     $('#st_mangler_effects').on('click', '.st_mangler_scale_step_delete', function () {
-        const id = $(this).closest('.st_mangler_effect').data('effect-id');
-        const effect = settings.effects.find(e => e.id === id);
+        const effect = findEffectFromEl(this, settings);
         if (!effect) return;
         const steps = scaleStepsFor(effect, $(this).data('rule-index'));
         if (!steps) return;
@@ -819,8 +813,7 @@ export function addSettingsUI() {
     });
 
     $('#st_mangler_effects').on('click', '.st_mangler_scale_step_move_up', function () {
-        const id = $(this).closest('.st_mangler_effect').data('effect-id');
-        const effect = settings.effects.find(e => e.id === id);
+        const effect = findEffectFromEl(this, settings);
         if (!effect) return;
         const steps = scaleStepsFor(effect, $(this).data('rule-index'));
         if (!steps) return;
@@ -830,8 +823,7 @@ export function addSettingsUI() {
     });
 
     $('#st_mangler_effects').on('click', '.st_mangler_scale_step_move_down', function () {
-        const id = $(this).closest('.st_mangler_effect').data('effect-id');
-        const effect = settings.effects.find(e => e.id === id);
+        const effect = findEffectFromEl(this, settings);
         if (!effect) return;
         const steps = scaleStepsFor(effect, $(this).data('rule-index'));
         if (!steps) return;
@@ -841,8 +833,7 @@ export function addSettingsUI() {
     });
 
     $('#st_mangler_effects').on('click', '.st_mangler_amount_step_add', function () {
-        const id = $(this).closest('.st_mangler_effect').data('effect-id');
-        const effect = settings.effects.find(e => e.id === id);
+        const effect = findEffectFromEl(this, settings);
         if (!effect) return;
         const steps = amountStepsFor(effect, $(this).data('rule-index'));
         if (!steps) return;
@@ -852,8 +843,7 @@ export function addSettingsUI() {
     });
 
     $('#st_mangler_effects').on('click', '.st_mangler_amount_step_delete', function () {
-        const id = $(this).closest('.st_mangler_effect').data('effect-id');
-        const effect = settings.effects.find(e => e.id === id);
+        const effect = findEffectFromEl(this, settings);
         if (!effect) return;
         const steps = amountStepsFor(effect, $(this).data('rule-index'));
         if (!steps) return;
@@ -863,8 +853,7 @@ export function addSettingsUI() {
     });
 
     $('#st_mangler_effects').on('click', '.st_mangler_amount_step_move_up', function () {
-        const id = $(this).closest('.st_mangler_effect').data('effect-id');
-        const effect = settings.effects.find(e => e.id === id);
+        const effect = findEffectFromEl(this, settings);
         if (!effect) return;
         const steps = amountStepsFor(effect, $(this).data('rule-index'));
         if (!steps) return;
@@ -874,8 +863,7 @@ export function addSettingsUI() {
     });
 
     $('#st_mangler_effects').on('click', '.st_mangler_amount_step_move_down', function () {
-        const id = $(this).closest('.st_mangler_effect').data('effect-id');
-        const effect = settings.effects.find(e => e.id === id);
+        const effect = findEffectFromEl(this, settings);
         if (!effect) return;
         const steps = amountStepsFor(effect, $(this).data('rule-index'));
         if (!steps) return;
@@ -936,8 +924,7 @@ export function addSettingsUI() {
     });
 
     $('#st_mangler_effects').on('click', '.st_mangler_rule_add', function () {
-        const id = $(this).closest('.st_mangler_effect').data('effect-id');
-        const effect = settings.effects.find(e => e.id === id);
+        const effect = findEffectFromEl(this, settings);
         if (!effect) return;
         effect.rules.push(defaultRule());
         refreshEffectList(settings);
@@ -951,8 +938,7 @@ export function addSettingsUI() {
     });
 
     $('#st_mangler_effects').on('click', '.st_mangler_rule_duplicate', function () {
-        const id = $(this).closest('.st_mangler_effect').data('effect-id');
-        const effect = settings.effects.find(e => e.id === id);
+        const effect = findEffectFromEl(this, settings);
         if (!effect) return;
         const index = $(this).data('rule-index');
         const original = effect.rules[index];
@@ -964,8 +950,7 @@ export function addSettingsUI() {
     });
 
     $('#st_mangler_effects').on('click', '.st_mangler_rule_delete', function () {
-        const id = $(this).closest('.st_mangler_effect').data('effect-id');
-        const effect = settings.effects.find(e => e.id === id);
+        const effect = findEffectFromEl(this, settings);
         if (!effect) return;
         const index = $(this).data('rule-index');
         collapsedRuleIds.delete(effect.rules[index]?.id);
@@ -975,16 +960,14 @@ export function addSettingsUI() {
     });
 
     $('#st_mangler_effects').on('click', '.st_mangler_rule_move_up', function () {
-        const id = $(this).closest('.st_mangler_effect').data('effect-id');
-        const effect = settings.effects.find(e => e.id === id);
+        const effect = findEffectFromEl(this, settings);
         if (!effect) return;
         moveItem(effect.rules, $(this).data('rule-index'), -1);
         refreshEffectList(settings);
         context.saveSettingsDebounced();
     });
     $('#st_mangler_effects').on('click', '.st_mangler_rule_move_down', function () {
-        const id = $(this).closest('.st_mangler_effect').data('effect-id');
-        const effect = settings.effects.find(e => e.id === id);
+        const effect = findEffectFromEl(this, settings);
         if (!effect) return;
         moveItem(effect.rules, $(this).data('rule-index'), 1);
         refreshEffectList(settings);
@@ -992,8 +975,7 @@ export function addSettingsUI() {
     });
 
     $('#st_mangler_effects').on('click', '.st_mangler_rule_condition_add', function () {
-        const id = $(this).closest('.st_mangler_effect').data('effect-id');
-        const effect = settings.effects.find(e => e.id === id);
+        const effect = findEffectFromEl(this, settings);
         if (!effect) return;
         const rule = effect.rules[$(this).data('rule-index')];
         if (!rule) return;
@@ -1003,8 +985,7 @@ export function addSettingsUI() {
     });
 
     $('#st_mangler_effects').on('click', '.st_mangler_rule_condition_delete', function () {
-        const id = $(this).closest('.st_mangler_effect').data('effect-id');
-        const effect = settings.effects.find(e => e.id === id);
+        const effect = findEffectFromEl(this, settings);
         if (!effect) return;
         const rule = effect.rules[$(this).data('rule-index')];
         if (!rule) return;
@@ -1028,8 +1009,7 @@ export function addSettingsUI() {
         const level = Number($(this).val());
         const panel = $(this).closest('.st_mangler_test_panel');
         panel.find('.st_mangler_test_level_val').text(level.toFixed(2));
-        const row = $(this).closest('.st_mangler_effect');
-        const effect = settings.effects.find(e => e.id === row.data('effect-id'));
+        const effect = findEffectFromEl(this, settings);
         if (effect) panel.find('.st_mangler_test_cue_val').text(resolveAwarenessCue(effect.awarenessCue, level, effect.promptLevelCap));
         if (effect && effect.type === 'llm-rewrite' && effect.llmRewrite.scaleMode === 'steps') {
             // Mirrors the tracker's own hitDirection for an accurate preview — same reasoning
@@ -1040,10 +1020,10 @@ export function addSettingsUI() {
     });
 
     $('#st_mangler_effects').on('click', '.st_mangler_test_run', async function () {
-        const row = $(this).closest('.st_mangler_effect');
-        const effect = settings.effects.find(e => e.id === row.data('effect-id'));
+        const effect = findEffectFromEl(this, settings);
         if (!effect) return;
 
+        const row = $(this).closest('.st_mangler_effect');
         const input = row.find('.st_mangler_test_input');
         const output = row.find('.st_mangler_test_output');
         const levelInput = row.find('.st_mangler_test_level');
@@ -1061,9 +1041,7 @@ export function addSettingsUI() {
     });
 
     $('#st_mangler_effects').on('input', '.st_mangler_field', function () {
-        const row = $(this).closest('.st_mangler_effect');
-        const id = row.data('effect-id');
-        const effect = settings.effects.find(e => e.id === id);
+        const effect = findEffectFromEl(this, settings);
         if (!effect) return;
 
         const fieldPath = $(this).data('field');
