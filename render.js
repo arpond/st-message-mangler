@@ -1,11 +1,12 @@
 import {
     getTrackerLevel, getTrackerTurnsActive, getTrackerLocked, trackerStatusBadgeHtml, describeDependencyState,
 } from './lib/chatState.js';
+import { getEventLog } from './lib/eventLog.js';
 import { resolveEffectTracker } from './lib/pure.js';
 import {
     infoIcon, field, renderRowIdentity, renderTriggerPanel, renderTrackerBasicsPanel, renderDependencyPanel,
     renderTrackerTestPanel, renderTrackerPickerField, renderTypeFields, renderTestPanel, renderRulesPanel,
-    dependencyWarningIconHtml, EFFECT_TYPE_LABELS, EFFECT_TABS, TRACKER_TABS,
+    dependencyWarningIconHtml, EFFECT_TYPE_LABELS, EFFECT_TABS, TRACKER_TABS, renderEventLogPanel,
 } from './lib/render.js';
 
 // Session-only (not persisted to settings) — which tracker/effect rows are currently expanded and
@@ -83,7 +84,9 @@ export function renderEffectRow(effect, allTrackers = []) {
         <div class="st_mangler_tab_btn ${tab.id === activeTab ? 'active' : ''}" data-tab="${tab.id}">${tab.label}</div>`).join('');
     const pane = (id, html) => `
         <div class="st_mangler_tab_pane" data-tab="${id}" style="display: ${id === activeTab ? 'block' : 'none'};">${html}</div>`;
-    const trackerDangling = !!effect.trackerId && !resolveEffectTracker(effect, allTrackers);
+    const resolvedTracker = resolveEffectTracker(effect, allTrackers);
+    const trackerDangling = !!effect.trackerId && !resolvedTracker;
+    const logEvents = resolvedTracker ? getEventLog(resolvedTracker.id) : [];
     return `
         <div class="st_mangler_effect" data-effect-id="${effect.id}">
             <div class="flex-container alignItemsCenter st_mangler_effect_header">
@@ -133,6 +136,11 @@ export function renderEffectRow(effect, allTrackers = []) {
                 ${pane('rules', renderRulesPanel(effect, allTrackers, collapsedRuleIds))}
                 ${effect.type === 'none' ? '' : pane('behavior', renderTypeFields(effect))}
                 ${pane('test', renderTestPanel(effect))}
+                ${pane('log', `
+                    ${renderEventLogPanel(logEvents)}
+                    <div class="menu_button menu_button_icon st_mangler_effect_export_log" title="Export this log as JSON">
+                        <i class="fa-solid fa-download"></i> Export log
+                    </div>`)}
             </div>
         </div>`;
 }

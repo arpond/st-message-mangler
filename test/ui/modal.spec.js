@@ -171,3 +171,34 @@ test('status panel set-level/dispel/active-toggle act on the effect\'s underlyin
     await expect(group().locator('.st_mangler_status_active')).toBeChecked();
     await expect(group().locator('.st_mangler_status_reset_active')).toHaveCount(0);
 });
+
+test('a manual status-panel dispel shows up in the effect\'s Log tab after the next re-render', async ({ page }) => {
+    await page.goto(HARNESS_URL);
+    await page.locator('#st_mangler_open_trackers_effects_modal').click();
+    await page.locator('#st_mangler_modal_effect_slot #st_mangler_add_effect').click();
+
+    const modalEffectSlot = page.locator('#st_mangler_modal_effect_slot');
+    const effect = modalEffectSlot.locator('.st_mangler_effect').first();
+
+    // The Log tab has nothing to show yet — the empty state.
+    await effect.locator('.st_mangler_tab_btn[data-tab="log"]').click();
+    await expect(effect.locator('.st_mangler_log_list')).toHaveCount(0);
+    await expect(effect.locator('.st_mangler_effect_body')).toContainText('No activity logged yet this session');
+
+    // Trigger a manual dispel via the status panel (opened from inside the still-open modal —
+    // its toggle button lives in #st_mangler_effects_pane, hidden outside the modal).
+    await page.locator('#st_mangler_status_panel_toggle').click();
+    await page.locator('.st_mangler_status_dispel').dispatchEvent('click');
+
+    // The Log tab, like every other effect-row field, only reflects new state on its next
+    // re-render (refreshEffectList) — not a live push mid-chat, the same "no full-list-rebuild
+    // per message" precedent as the collapsed-row status badges. `label` is one of the
+    // deliberately lighter-weight fields that *don't* trigger a full refresh (status-panel-only),
+    // so switching the effect's type (which does, since it changes which tabs are visible) is the
+    // reliable way to trigger one here, same as a real user editing any other field would.
+    await effect.locator('select[data-field="type"]').selectOption('drunk');
+
+    const refreshedEffect = modalEffectSlot.locator('.st_mangler_effect').first();
+    await refreshedEffect.locator('.st_mangler_tab_btn[data-tab="log"]').click();
+    await expect(refreshedEffect.locator('.st_mangler_log_row')).toContainText('Dispelled manually (status panel)');
+});

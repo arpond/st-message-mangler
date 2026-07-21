@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test test/pure.test.js test/render.test.js",
+    "test": "node --test test/pure.test.js test/render.test.js test/eventLog.test.js",
     "test:ui": "playwright test -c test/ui"
   },
   "devDependencies": {

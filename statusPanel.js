@@ -9,6 +9,12 @@ import {
 } from './lib/chatState.js';
 import { escapeHtmlForDisplay, resolveChatActiveState, resolveEffectTracker, meetsDirectionalThreshold, restingLevelValue } from './lib/pure.js';
 import { bindableCharacters } from './lib/characterUtils.js';
+import { getEventLog, logEvent } from './lib/eventLog.js';
+import { renderEventLogPanel } from './lib/render.js';
+
+// Trimmed to the most recent handful — this feed is a glanceable "what just happened", not the
+// full history (the per-effect Log tab in the settings panel shows the complete, capped log).
+const STATUS_PANEL_RECENT_EVENTS = 5;
 
 // ---- Floating status panel ----
 // A small draggable overlay (standard ST popout pattern: .draggable div in #movingDivs, position
@@ -91,6 +97,7 @@ function renderTrackerGroupHtml(tracker, effects, trackerById) {
                     ${levelInput}
                 </div>
                 ${effectRows}
+                ${renderEventLogPanel(getEventLog(tracker.id).slice(-STATUS_PANEL_RECENT_EVENTS))}
             </div>`;
 }
 
@@ -150,15 +157,19 @@ function openStatusPanel(settings) {
         const tracker = findTrackerFromEl(this, getSettings(), '.st_mangler_status_tracker_group');
         if (!tracker) return;
         const level = Number($(this).val());
+        const from = getTrackerLevel(tracker);
         setTrackerLevel(tracker, level);
         setTrackerTurnsActive(tracker, 0);
         setTrackerLocked(tracker, false);
+        logEvent(tracker.id, 'manual-set-level', { from, to: level });
         refreshStatusPanelContents(getSettings());
     });
     $('#st_mangler_status_panel').on('change', '.st_mangler_status_active', function () {
         const tracker = findTrackerFromEl(this, getSettings(), '.st_mangler_status_tracker_group');
         if (!tracker) return;
-        setTrackerChatActiveOverride(tracker, $(this).prop('checked'));
+        const active = $(this).prop('checked');
+        setTrackerChatActiveOverride(tracker, active);
+        logEvent(tracker.id, 'manual-active-toggle', { active });
         refreshStatusPanelContents(getSettings());
     });
     $('#st_mangler_status_panel').on('click', '.st_mangler_status_reset_active', function () {
@@ -170,9 +181,11 @@ function openStatusPanel(settings) {
     $('#st_mangler_status_panel').on('click', '.st_mangler_status_dispel', function () {
         const tracker = findTrackerFromEl(this, getSettings(), '.st_mangler_status_tracker_group');
         if (!tracker) return;
-        setTrackerLevel(tracker, restingLevelValue(tracker.restingLevel));
+        const to = restingLevelValue(tracker.restingLevel);
+        setTrackerLevel(tracker, to);
         setTrackerTurnsActive(tracker, 0);
         setTrackerLocked(tracker, false);
+        logEvent(tracker.id, 'manual-dispel', {});
         refreshStatusPanelContents(getSettings());
     });
     $('#st_mangler_status_panel').on('change', '.st_mangler_status_bind', function () {

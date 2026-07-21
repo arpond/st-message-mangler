@@ -4,6 +4,20 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v47
+
+- **Event log** — a new **Log** tab per effect (Basics/Rules/Transform/Test/Log) shows a
+  plain-language, session-only history of its tracker's activity: level changes (with a reason,
+  e.g. "keyword hit"), dispels/auto-dispels/locks, and awareness cues actually injected (long cue
+  text truncated, hover for the full text). The floating status panel gains the same feed,
+  trimmed to the last 5 entries per tracker. An **Export log** button downloads a tracker's full
+  (capped at 150 entries) buffer as JSON. Deliberately doesn't log plain decay (only actual hits)
+  or repeat an unchanged cue every message, so it stays scannable — the readable alternative to
+  the existing hidden `debug` console flag for "what happened and why," not a replacement for its
+  full pipeline trace. Session-only, like other UI-only state in this extension — cleared on
+  reload or chat switch, no new `chatMetadata` growth. Note: neither view is live-pushed mid-chat,
+  only reflects new activity on that surface's next natural re-render.
+
 ## v46
 
 - **Fix: duplicating or re-importing an effect with rules could share collapse state across

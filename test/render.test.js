@@ -4,6 +4,7 @@ import { defaultEffect, defaultTracker, defaultTrackerShape, defaultRule } from 
 import {
     infoIcon, field, renderRowIdentity, renderTriggerPanel, renderDependencyPanel, renderTypeFields, renderTestPanel,
     renderTrackerTestPanel, renderTrackerPickerField, renderRulesPanel, renderTrackerBasicsPanel, EFFECT_TYPE_LABELS,
+    renderEventLogPanel,
 } from '../lib/render.js';
 
 test('infoIcon renders a title-bearing icon with the given text', () => {
@@ -573,4 +574,29 @@ test('renderRulesPanel renders a duplicate button per rule, addressed by rule in
     const html = renderRulesPanel(effect, []);
     assert.match(html, /st_mangler_rule_duplicate" data-rule-index="0"/);
     assert.match(html, /st_mangler_rule_duplicate" data-rule-index="1"/);
+});
+
+test('renderEventLogPanel shows an empty-state message when there are no events', () => {
+    const html = renderEventLogPanel([]);
+    assert.match(html, /No activity logged yet this session/);
+});
+
+test('renderEventLogPanel renders events newest-first', () => {
+    const events = [
+        { ts: 1000, kind: 'level-change', detail: { from: 0, to: 0.3, reason: 'keyword hit' } },
+        { ts: 2000, kind: 'dispel', detail: { reason: 'dispel keyword matched' } },
+    ];
+    const html = renderEventLogPanel(events);
+    const dispelIndex = html.indexOf('Dispelled');
+    const levelIndex = html.indexOf('Level 0.00');
+    assert.ok(dispelIndex >= 0 && levelIndex >= 0 && dispelIndex < levelIndex, 'newest event (dispel) should render before the older level-change');
+});
+
+test('renderEventLogPanel adds a title tooltip only for a truncated cue', () => {
+    const shortCue = renderEventLogPanel([{ ts: 1, kind: 'cue-injected', detail: { text: 'short' } }]);
+    assert.doesNotMatch(shortCue, /title="/);
+
+    const longText = 'y'.repeat(80);
+    const longCue = renderEventLogPanel([{ ts: 1, kind: 'cue-injected', detail: { text: longText } }]);
+    assert.match(longCue, new RegExp(`title="${longText}"`));
 });

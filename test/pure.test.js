@@ -15,6 +15,7 @@ import {
     defaultRule, resolveRuleOutput, sanitizeRules, buildTrackerAutoCueTemplate,
     resolveGlobalAwarenessHit, resolveGlobalAwarenessDecay, AMOUNT_PRESETS,
     resolveAmountStep, sanitizeAmountSteps, migrateAmountToSteps,
+    formatEventTimestamp, describeLogEvent,
 } from '../lib/pure.js';
 
 test('clamp01 clamps to [0, 1]', () => {
@@ -1518,4 +1519,41 @@ test('sanitizeRules defaults a missing steps array and sanitizes its thresholds 
     assert.equal(withBadStep[0].steps[0].threshold, 0);
     assert.equal(withBadStep[0].steps[0].text, '');
     assert.equal(warnings.length, 1);
+});
+
+test('formatEventTimestamp renders local HH:MM:SS, zero-padded', () => {
+    const ts = new Date(2026, 0, 1, 4, 5, 6).getTime();
+    assert.equal(formatEventTimestamp(ts), '04:05:06');
+});
+
+test('describeLogEvent describes a level-change event with from/to/reason', () => {
+    const { summary, full } = describeLogEvent({ kind: 'level-change', detail: { from: 0, to: 0.3, reason: 'keyword hit' } });
+    assert.equal(summary, 'Level 0.00 → 0.30 (keyword hit)');
+    assert.equal(full, null);
+});
+
+test('describeLogEvent describes dispel/auto-dispel/lock events', () => {
+    assert.equal(describeLogEvent({ kind: 'dispel', detail: { reason: 'dispel keyword matched' } }).summary, 'Dispelled (dispel keyword matched)');
+    assert.equal(describeLogEvent({ kind: 'auto-dispel', detail: { reason: 'active for 12 turns (max 10)' } }).summary, 'Auto-dispelled (active for 12 turns (max 10))');
+    assert.equal(describeLogEvent({ kind: 'lock', detail: { level: 0.9, lockThreshold: 0.9 } }).summary, 'Locked at 0.90 (lock threshold 0.9)');
+});
+
+test('describeLogEvent leaves a short cue untruncated with no "full" text', () => {
+    const { summary, full } = describeLogEvent({ kind: 'cue-injected', detail: { text: 'short cue' } });
+    assert.equal(summary, 'Cue: "short cue"');
+    assert.equal(full, null);
+});
+
+test('describeLogEvent truncates a long cue to 60 chars and exposes the full text separately', () => {
+    const longText = 'x'.repeat(80);
+    const { summary, full } = describeLogEvent({ kind: 'cue-injected', detail: { text: longText } });
+    assert.equal(summary, `Cue: "${'x'.repeat(60)}…"`);
+    assert.equal(full, longText);
+});
+
+test('describeLogEvent describes manual status-panel actions', () => {
+    assert.equal(describeLogEvent({ kind: 'manual-dispel', detail: {} }).summary, 'Dispelled manually (status panel)');
+    assert.equal(describeLogEvent({ kind: 'manual-set-level', detail: { from: 0, to: 0.6 } }).summary, 'Level set manually → 0.60');
+    assert.equal(describeLogEvent({ kind: 'manual-active-toggle', detail: { active: true } }).summary, 'Active toggled on manually');
+    assert.equal(describeLogEvent({ kind: 'manual-active-toggle', detail: { active: false } }).summary, 'Active toggled off manually');
 });

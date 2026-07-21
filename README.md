@@ -637,6 +637,23 @@ is the easier way to reach the panel on mobile, where scrolling to the settings-
 awkward. Drag it anywhere (position persists across reloads via SillyTavern's Moving UI); close it
 with the ✕ or either toolbar button. The panel starts closed on each page load.
 
+Each group also shows its **last 5 logged events** (see Event log below) — unlike the level/lock
+badge above it, this feed is a snapshot from whenever the panel last rendered, not a live push; it
+picks up new entries the next time you reopen the panel or take an action in it.
+
+### Event log
+
+Every effect has a **Log** tab (alongside Basics/Rules/Transform/Test) showing a plain-language
+history of its tracker's activity this session — level changes (with the reason, e.g. "keyword
+hit"), dispels/auto-dispels/locks, and awareness cues actually injected (long cue text is
+truncated, hover for the full text). This is the readable alternative to the `debug` console flag
+below when you just want to know "what happened and why," not a full pipeline trace. It's
+session-only (cleared on reload or switching chats, capped at the 150 most recent events per
+tracker — same "fixed-size state" convention this extension uses elsewhere) and, like the status
+panel's feed above, only reflects new activity the next time that effect's row re-renders — not a
+live push mid-chat. Click **Export log** on the tab to download that tracker's full buffer as
+JSON, e.g. to keep a copy past the current session.
+
 ### Pausing transforms for one message
 
 Click **Pause next message** in the wand/extensions menu, or run `/mangler-pause`, to skip every
@@ -654,9 +671,10 @@ cancel a pending pause without waiting for it to consume itself.
 
 ### Debug logging
 
-There's a `debug` setting with no UI control — enable it from the browser console when you need
-to trace exactly what the pipeline is doing for a message (current level per tracker, whether the
-threshold was reached, whether a rewrite actually happened, detector batching, etc.),
+For "what happened and why" at a glance, see the Event log above first — this is the deeper,
+noisier option: a `debug` setting with no UI control, enabled from the browser console when you
+need to trace exactly what the pipeline is doing for a message (current level per tracker, whether
+the threshold was reached, whether a rewrite actually happened, detector batching, etc.),
 including the full text of every prompt actually sent to your connected model (llm-rewrite,
 batched LLM detection, and the Test panel's detection check):
 

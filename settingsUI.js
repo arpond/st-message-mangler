@@ -9,6 +9,7 @@ import {
     describeDependencyState,
 } from './lib/chatState.js';
 import { runDetectionTest } from './lib/llmClient.js';
+import { getEventLog } from './lib/eventLog.js';
 import {
     escapeHtmlForDisplay, resolveAwarenessCue, backfillDefaults,
     resolveScaleStep, generateScaleSteps, sanitizeScaleSteps, sanitizeRules,
@@ -174,6 +175,21 @@ function exportSingleEffect(effect, settings) {
     const tracker = resolveEffectTracker(effect, settings.trackers);
     const slug = effect.label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
     downloadSettingsJson(tracker ? [tracker] : [], [effect], `message-mangler-effect-${slug || effect.id}.json`);
+}
+
+// Same download-a-Blob pattern as downloadSettingsJson above, dumping the full session-only event
+// log (lib/eventLog.js) for one tracker rather than settings — the log is capped/in-memory, so
+// this is the only way to keep a copy past the current session/reload.
+function exportEventLog(trackerId, trackerLabel) {
+    const events = getEventLog(trackerId);
+    const slug = (trackerLabel || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    const blob = new Blob([JSON.stringify(events, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `message-mangler-log-${slug || trackerId}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
 }
 
 // Imported trackers/effects always get fresh ids and are appended (never replace/overwrite
@@ -757,6 +773,14 @@ export function addSettingsUI() {
     $('#st_mangler_effects').on('click', '.st_mangler_effect_export_single', function () {
         const effect = findEffectFromEl(this, settings);
         if (effect) exportSingleEffect(effect, settings);
+    });
+
+    $('#st_mangler_effects').on('click', '.st_mangler_effect_export_log', function () {
+        const effect = findEffectFromEl(this, settings);
+        if (!effect) return;
+        const tracker = resolveEffectTracker(effect, settings.trackers);
+        if (!tracker) return;
+        exportEventLog(tracker.id, tracker.label);
     });
 
     $('#st_mangler_effects').on('click', '.st_mangler_effect_delete', function () {

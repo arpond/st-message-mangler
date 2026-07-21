@@ -8,6 +8,7 @@ import {
     getGlobalAwarenessLevel, setGlobalAwarenessLevel,
 } from './lib/chatState.js';
 import { runBatchedLlmDetectors, runLlmRewrite } from './lib/llmClient.js';
+import { logEvent, logCueEvent } from './lib/eventLog.js';
 import {
     matchesKeywordList, applyRegexEffect, applyDrunk, escapeHtmlForDisplay, wordDiffHighlight,
     resolveAwarenessCue, resolveLevelTrend, splitContinuationSuffix, buildRespondingToContext,
@@ -82,20 +83,32 @@ function updateAndGetTrackerLevel(tracker, detectionText, prerequisiteMet) {
         setTrackerTurnsActive(tracker, 0);
         setTrackerLocked(tracker, false);
         log(`Dispelled "${tracker.label}" — dispel keyword matched.`);
-        return { level: setTrackerLevel(tracker, restingLevelValue(tracker.restingLevel)), hit: false };
+        const from = getTrackerLevel(tracker);
+        const to = restingLevelValue(tracker.restingLevel);
+        logEvent(tracker.id, 'dispel', { reason: 'dispel keyword matched', from, to });
+        return { level: setTrackerLevel(tracker, to), hit: false };
     }
 
     // llm detector: level is read-only here (runBatchedLlmDetectors updates it elsewhere) — avoid
     // an unnecessary chatMetadata write/DOM refresh every message for trackers whose level didn't
     // actually change on this path.
+    const levelBefore = getTrackerLevel(tracker);
     const level = tracker.detector === 'llm' ? result.level : setTrackerLevel(tracker, result.level);
     debugLog(`updateAndGetTrackerLevel "${tracker.label}": ${tracker.detector === 'llm' ? 'llm detector, reading last-known level' : 'keyword'}=${level.toFixed(2)}`);
+    // Only an actual hit logs a level-change — plain decay firing every quiet turn would dominate
+    // the log's fixed-size buffer with the least interesting events (matches the "don't log
+    // decay" call made when this feature was scoped).
+    if (tracker.detector !== 'llm' && result.hit) {
+        logEvent(tracker.id, 'level-change', { from: levelBefore, to: level, reason: 'keyword hit' });
+    }
 
     const turns = setTrackerTurnsActive(tracker, result.turnsActive);
     if (result.autoDispelled) {
         setTrackerTurnsActive(tracker, 0);
         log(`Auto-dispelled "${tracker.label}" — active for ${turns} turns (max ${tracker.maxTurnsActive}).`);
-        return { level: setTrackerLevel(tracker, restingLevelValue(tracker.restingLevel)), hit: false };
+        const to = restingLevelValue(tracker.restingLevel);
+        logEvent(tracker.id, 'auto-dispel', { reason: `active for ${turns} turns (max ${tracker.maxTurnsActive})`, from: level, to });
+        return { level: setTrackerLevel(tracker, to), hit: false };
     }
     return { level, hit: result.hit };
 }
@@ -163,10 +176,12 @@ function updateAwarenessCue(effect, level, active, trend = 'steady', ruleCue = n
     const cueTemplate = ruleCue !== null ? ruleCue : effect.awarenessCue;
     if (!cueTemplate || !active) {
         context.setExtensionPrompt(key, '', extension_prompt_types.IN_CHAT, 0);
+        logCueEvent(key, effect.trackerId, '');
         return;
     }
     const cue = resolveAwarenessCue(cueTemplate, level, effect.promptLevelCap, trend, resolvedTrackers, trackerById);
     context.setExtensionPrompt(key, cue, extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
+    logCueEvent(key, effect.trackerId, cue);
 }
 
 export function trackerAutoCueKey(trackerId) {
@@ -189,10 +204,12 @@ function updateTrackerAutoCue(tracker, level, trend, active) {
     const key = trackerAutoCueKey(tracker.id);
     if (!tracker.autoAwarenessCue || !active) {
         context.setExtensionPrompt(key, '', extension_prompt_types.IN_CHAT, 0);
+        logCueEvent(key, tracker.id, '');
         return;
     }
     const cue = resolveAwarenessCue(buildTrackerAutoCueTemplate(tracker), level, 0.99, trend);
     context.setExtensionPrompt(key, cue, extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.SYSTEM);
+    logCueEvent(key, tracker.id, cue);
 }
 
 // Fixed, singleton key — unlike awarenessCueKey/trackerAutoCueKey above, this one cue isn't

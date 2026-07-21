@@ -14,6 +14,7 @@ import { context } from './lib/context.js';
 import { log } from './lib/log.js';
 import { getSettings } from './lib/settings.js';
 import { resetLevelsOnFreshFork } from './lib/chatState.js';
+import { clearEventLog } from './lib/eventLog.js';
 import { onMessageSent, onCharacterMessageRendered, clearAllAwarenessCues, clearAllTrackerAutoCues, clearGlobalAwarenessCue } from './pipeline.js';
 import { addWandStatusButton, addWandPauseButton } from './statusPanel.js';
 import { addSettingsUI, registerSlashCommands, refreshEffectList, refreshTrackerList, refreshDetectionProfileDropdown } from './settingsUI.js';
@@ -31,6 +32,7 @@ context.eventSource.on(context.eventTypes.CHAT_CHANGED, () => {
     clearAllTrackerAutoCues(settings);
     clearGlobalAwarenessCue();
     resetLevelsOnFreshFork(settings);
+    clearEventLog();
     // Levels/turns/locked are per-chat — the settings panel's collapsed-row badges (and the
     // floating status panel, refreshed as part of the same call) were otherwise left showing
     // whatever chat they were last rendered for until some unrelated action (e.g. expanding a
