@@ -4,6 +4,13 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v45
+
+- **Warn when the batched LLM detector packs many conditions into one call** — same "model
+  misses/confuses some instructions" risk as one complex prompt. A soft console warning now fires
+  when 6+ trackers' conditions are batched into a single classification call. No auto-splitting,
+  no new setting — just a flag.
+
 ## v44
 
 - **Warn when many `llm-rewrite` effects are active at once** — unlike detection (batched into one
