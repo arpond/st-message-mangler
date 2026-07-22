@@ -9,12 +9,7 @@ import {
 } from './lib/chatState.js';
 import { escapeHtmlForDisplay, resolveChatActiveState, resolveEffectTracker, meetsDirectionalThreshold, restingLevelValue } from './lib/pure.js';
 import { bindableCharacters } from './lib/characterUtils.js';
-import { getEventLog, logEvent } from './lib/eventLog.js';
-import { renderEventLogPanel } from './lib/render.js';
-
-// Trimmed to the most recent handful — this feed is a glanceable "what just happened", not the
-// full history (the per-effect Log tab in the settings panel shows the complete, capped log).
-const STATUS_PANEL_RECENT_EVENTS = 5;
+import { getEventLog, logEvent, renderEventLogPanel, STATUS_PANEL_RECENT_EVENTS } from './lib/eventLog.js';
 
 // ---- Floating status panel ----
 // A small draggable overlay (standard ST popout pattern: .draggable div in #movingDivs, position
@@ -97,7 +92,7 @@ function renderTrackerGroupHtml(tracker, effects, trackerById) {
                     ${levelInput}
                 </div>
                 ${effectRows}
-                ${renderEventLogPanel(getEventLog(tracker.id).slice(-STATUS_PANEL_RECENT_EVENTS))}
+                ${renderEventLogPanel(getEventLog(tracker.id).slice(-STATUS_PANEL_RECENT_EVENTS), tracker.id)}
             </div>`;
 }
 

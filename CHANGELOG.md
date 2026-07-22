@@ -4,6 +4,12 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v48
+
+- **Live-refresh the event log** — the Log tab and status panel feed added in v47 now update the
+  instant a new entry is logged, instead of only on that surface's next full re-render. Same
+  targeted-`.replaceWith()` pattern the level/lock badge already used, scoped by tracker id.
+
 ## v47
 
 - **Event log** — a new **Log** tab per effect (Basics/Rules/Transform/Test/Log) shows a

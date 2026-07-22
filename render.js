@@ -87,6 +87,7 @@ export function renderEffectRow(effect, allTrackers = []) {
     const resolvedTracker = resolveEffectTracker(effect, allTrackers);
     const trackerDangling = !!effect.trackerId && !resolvedTracker;
     const logEvents = resolvedTracker ? getEventLog(resolvedTracker.id) : [];
+    const logTrackerId = resolvedTracker ? resolvedTracker.id : '';
     return `
         <div class="st_mangler_effect" data-effect-id="${effect.id}">
             <div class="flex-container alignItemsCenter st_mangler_effect_header">
@@ -137,7 +138,7 @@ export function renderEffectRow(effect, allTrackers = []) {
                 ${effect.type === 'none' ? '' : pane('behavior', renderTypeFields(effect))}
                 ${pane('test', renderTestPanel(effect))}
                 ${pane('log', `
-                    ${renderEventLogPanel(logEvents)}
+                    ${renderEventLogPanel(logEvents, logTrackerId)}
                     <div class="menu_button menu_button_icon st_mangler_effect_export_log" title="Export this log as JSON">
                         <i class="fa-solid fa-download"></i> Export log
                     </div>`)}
