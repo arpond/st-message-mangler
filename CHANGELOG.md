@@ -4,6 +4,14 @@ All notable changes to Message Mangler, in [Keep a Changelog](https://keepachang
 style, newest first. This project doesn't follow strict semver — version numbers here just mark
 successive rounds of development.
 
+## v49
+
+- **Regroup a rule's fields into labeled sections** — a fully-configured rule (conditions,
+  awareness cue, Ladder tracker, Creative-freedom ladder, Step ladder/Instruction text) used to
+  render as one undifferentiated list. "Conditions" and "Scaling & creative freedom" section
+  headers now separate the groups, same dashed-header style the Trigger panel's
+  Detection/Escalation/Safety sections already use.
+
 ## v48
 
 - **Live-refresh the event log** — the Log tab and status panel feed added in v47 now update the
